@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-单元测试：验证前端架构核心组件
-不启动GUI，直接测试逻辑功能
+Legacy demo script for an early frontend architecture spike.
+Kept for historical reference and excluded from the default pytest surface.
 """
 
 import sys

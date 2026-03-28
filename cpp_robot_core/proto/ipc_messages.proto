@@ -5,8 +5,23 @@ package spine_core;
 message Command {
   int32 protocol_version = 1;
   string command = 2;
-  string payload = 3;
-  int64 request_id = 4;
+  string payload_json = 3;
+  string request_id = 4;
+}
+
+message Reply {
+  int32 protocol_version = 1;
+  bool ok = 2;
+  string message = 3;
+  string request_id = 4;
+  string data_json = 5;
+}
+
+message TelemetryEnvelope {
+  int32 protocol_version = 1;
+  string topic = 2;
+  int64 ts_ns = 3;
+  string data_json = 4;
 }
 
 message RobotTelemetry {

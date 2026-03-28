@@ -1,46 +1,38 @@
 # IPC Protocol
 
-本工程采用本机双通道 IPC：
+本工程采用本机双通道 IPC，正式协议统一为 TLS 1.3 + length-prefixed Protobuf：
 
-- Command Channel: TCP REQ/REP, default `127.0.0.1:5656`
-- Telemetry Channel: TCP PUB/SUB-style fanout, default `127.0.0.1:5657`
+- Command Channel: request/reply, default `127.0.0.1:5656`
+- Telemetry Channel: fanout stream, default `127.0.0.1:5657`
 - All envelopes include `protocol_version = 1`
+- Python `RobotCoreClientBackend`、C++ `CommandServer`、`scripts/mock_robot_core_server.py` 必须共用同一协议定义
 
-## 1. Command Envelope
+## 1. Protobuf Messages
 
-```json
-{
-  "protocol_version": 1,
-  "command": "start_scan",
-  "payload": {"scan_speed": 8.0},
-  "request_id": "uuid"
-}
-```
+### Command
+- `protocol_version: int32`
+- `command: string`
+- `payload_json: string`
+- `request_id: string`
 
-## 2. Reply Envelope
+### Reply
+- `protocol_version: int32`
+- `ok: bool`
+- `message: string`
+- `request_id: string`
+- `data_json: string`
 
-```json
-{
-  "protocol_version": 1,
-  "ok": true,
-  "message": "start_scan accepted",
-  "request_id": "uuid",
-  "data": {}
-}
-```
+### TelemetryEnvelope
+- `protocol_version: int32`
+- `topic: string`
+- `ts_ns: int64`
+- `data_json: string`
 
-## 3. Telemetry Envelope
+说明：
+- 传输层不再使用 JSON 行协议。
+- `payload_json` / `data_json` 作为 protobuf 内部承载的对象型 JSON 字符串，用于保持 UI 与 runtime 的 payload 形状稳定。
 
-```json
-{
-  "protocol_version": 1,
-  "topic": "robot_state",
-  "ts_ns": 1234567890,
-  "data": {}
-}
-```
-
-## 4. Commands
+## 2. Commands
 
 - `connect_robot`
 - `disconnect_robot`
@@ -61,7 +53,7 @@
 - `clear_fault`
 - `emergency_stop`
 
-`lock_session` payload 约定至少包含：
+`lock_session` payload 至少包含：
 - `experiment_id`
 - `session_id`
 - `session_dir`
@@ -71,65 +63,65 @@
 - `build_id`
 - `scan_plan_hash`
 
-`load_scan_plan` payload 约定包含完整 `scan_plan` 对象。
+`load_scan_plan` payload 包含完整 `scan_plan` 对象。
 
-## 5. Topics
+## 3. Topics
 
-### core_state
-- execution_state
-- armed
-- fault_code
-- active_segment
-- progress_pct
-- session_id
+### `core_state`
+- `execution_state`
+- `armed`
+- `fault_code`
+- `active_segment`
+- `progress_pct`
+- `session_id`
 
-### robot_state
-- powered
-- operate_mode
-- joint_pos
-- joint_vel
-- joint_torque
-- cart_force
-- tcp_pose
-- last_event
-- last_controller_log
+### `robot_state`
+- `powered`
+- `operate_mode`
+- `joint_pos`
+- `joint_vel`
+- `joint_torque`
+- `cart_force`
+- `tcp_pose`
+- `last_event`
+- `last_controller_log`
 
-### contact_state
-- mode
-- confidence
-- pressure_current
-- recommended_action
+### `contact_state`
+- `mode`
+- `confidence`
+- `pressure_current`
+- `recommended_action`
 
-### scan_progress
-- active_segment
-- path_index
-- overall_progress
-- frame_id
+### `scan_progress`
+- `active_segment`
+- `path_index`
+- `overall_progress`
+- `frame_id`
 
-### device_health
-- devices
+### `device_health`
+- `devices`
 
-### safety_status
-- safe_to_arm
-- safe_to_scan
-- active_interlocks
+### `safety_status`
+- `safe_to_arm`
+- `safe_to_scan`
+- `active_interlocks`
 
-### recording_status
-- session_id
-- recording
-- dropped_samples
-- last_flush_ns
+### `recording_status`
+- `session_id`
+- `recording`
+- `dropped_samples`
+- `last_flush_ns`
 
-### quality_feedback
-- image_quality
-- feature_confidence
-- quality_score
-- need_resample
+### `quality_feedback`
+- `image_quality`
+- `feature_confidence`
+- `quality_score`
+- `need_resample`
 
-### alarm_event
-- severity
-- source
-- message
-- session_id
-- segment_id
-- event_ts_ns
+### `alarm_event`
+- `severity`
+- `source`
+- `message`
+- `session_id`
+- `segment_id`
+- `event_ts_ns`

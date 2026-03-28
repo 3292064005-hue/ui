@@ -10,7 +10,7 @@
 
 ### 基础优化阶段 (2026-03-28)
 - ✅ **自适应控制频率**：在 `RtMotionService` 中实现 `AdaptiveTimer` 类，根据CPU负载动态调整控制周期 (0.5-2ms)，减少抖动，提升性能。
-- ✅ **IPC效率提升**：替换字符串JSON为Protobuf序列化，减少开销。添加 `ipc_messages.proto`，更新 `CommandServer` 和 `TelemetryPublisher` 使用Protobuf。效率提升：5.22x更快，2.5x更小。
+- ✅ **IPC效率提升**：命令与遥测统一为 TLS 1.3 + length-prefixed Protobuf，Python `RobotCoreClientBackend`、C++ `CommandServer`、`scripts/mock_robot_core_server.py` 共用同一协议面。
 - ✅ **错误处理与安全**：实现统一异常处理器 (`ExceptionHandler`)，分类错误并提供用户反馈；C++端扩展 `RecoveryManager` 添加自动重试；添加TLS 1.3加密IPC通道，防止中间人攻击。
 - 🔄 **代码质量**：Clang-Tidy修复，重构测试。
 
@@ -29,12 +29,12 @@
 - 统一 `protocol_version = 1` 的命令/遥测契约
 - `AppController` 已拆成更薄的编排层，状态解析、session/manifest、路径预览与导出分别下沉到独立服务
 - `MockBackend` 与 `scripts/mock_robot_core_server.py` 复用同一套 mock core runtime
-- `RobotCoreClientBackend` 退化为纯 TCP 传输层，UI 不再维护第二份执行状态
+- `RobotCoreClientBackend` 统一为 TLS/Protobuf 传输层，UI 不再维护第二份执行状态
 - `ExperimentManager` 改为先保存 preview plan，再在 `lock_session` 时一次性写死 manifest 和最终 `scan_plan_hash`
-- `cpp_robot_core/` 已具备可运行的 TCP command/telemetry runtime，`core` 模式可以真实连接到 `robot_core_main`
+- `cpp_robot_core/` 已具备可运行的 `spine_robot_core` runtime，`core` 模式可以真实连接到正式 C++ 控制面
 
 当前能力矩阵：
-- `Implemented`：双 TCP IPC、UI 只读 telemetry、preview plan -> lock session -> load plan 流程、session manifest、core/ui 双侧 recorder、C++ simulated robot_core runtime
+- `Implemented`：双通道 TLS/Protobuf IPC、UI 只读 telemetry、preview plan -> lock session -> load plan 流程、session manifest、core/ui 双侧 recorder、C++ simulated robot_core runtime
 - `Simulated`：视觉定位、路径预览生成、C++ core 内部机器人运动/接触过程、quality feedback
 - `Planned`：真实 ROKAE xCore SDK 深度控制、真实相机/超声/压力设备接入、预处理/重建/Cobb 角算法
 
@@ -68,18 +68,28 @@ python scripts/mock_robot_core_server.py
 SPINE_UI_BACKEND=core python run.py --backend core
 ```
 
-### 3. 启动 C++ robot_core 模拟控制面
+### 3. 启动 C++ `spine_robot_core` 模拟控制面
 ```bash
 cd cpp_robot_core
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-./build/robot_core_main
+./build/spine_robot_core
 ```
 
 ### 4. 一键启动 C++ core + GUI
 ```bash
 ./scripts/start_real.sh
 ```
+
+### 5. 主线测试入口
+```bash
+python -m pytest -q
+cmake -S cpp_robot_core -B cpp_robot_core/build -DCMAKE_BUILD_TYPE=Release
+cmake --build cpp_robot_core/build -j
+ctest --test-dir cpp_robot_core/build --output-on-failure
+```
+
+如果本机装了 ROS/第三方 pytest 插件，优先使用仓库内置的 `python -m pytest` 或 `./scripts/test_python.sh -q`，这样会自动关闭外部插件自动注入，只跑主线 `tests/` 测试面。
 
 ## 架构原则
 
@@ -162,7 +172,7 @@ scripts/
 例如当前工程里已有：
 
 mock_robot_core_server.py
-用于模拟 cpp_robot_core，方便在没有真机时验证 GUI 与 IPC 通信链路。
+用于模拟 `spine_robot_core`，方便在没有真机时验证 GUI 与 TLS/Protobuf IPC 通信链路。
 tests/
 
 测试目录。
@@ -223,10 +233,11 @@ src/
 apps/
 
 可执行入口目录。
-通常包括：
+当前正式运行入口为：
 
-robot_core_main.cpp：正式运行入口
-robot_core_cli.cpp：命令行调试入口
+- `src/main_ubuntu_rt.cpp` -> 构建产物 `spine_robot_core`
+
+保留的 `apps/*_legacy.cpp` 仅作历史参考，不再是正式入口。
 tests/
 
 C++ 侧测试代码目录。

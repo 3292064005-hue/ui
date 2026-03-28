@@ -36,6 +36,7 @@ class ShmPoseReader:
         self.shm_name = shm_name.lstrip('/') # Linux 下 shared_memory 模块通常不需要前导斜杠
         self.shm = None
         self.layout = None
+        self._closed = False
 
         # 挂载清理钩子，应对 Python 异常退出
         atexit.register(self.close)
@@ -163,6 +164,17 @@ class ShmPoseReader:
 
     def close(self):
         """安全释放资源"""
+        if self._closed:
+            return
+        self._closed = True
+
+        atexit.unregister(self.close)
+
+        if self.layout is not None:
+            # `from_buffer()` keeps an exported pointer alive until the ctypes
+            # wrapper is released, so drop it before closing the mmap.
+            self.layout = None
+
         if self.shm:
             self.shm.close() # 注意：Python 作为 Client 只 close，不 unlink，留给 C++ 销毁
             self.shm = None

@@ -191,6 +191,7 @@ class AppController(QObject):
             if not reply.ok:
                 self.session_service.rollback_pending_lock(self.preview_scan_plan)
                 self._log("ERROR", f"锁定会话失败：{reply.message}")
+                self._emit_status()
                 return
             self.workflow_artifacts.session_locked = True
             self.workflow_artifacts.session_id = locked.session_id
@@ -198,14 +199,15 @@ class AppController(QObject):
             self._log("INFO", f"会话 {locked.session_id} 已锁定，manifest 不再允许改写语义字段。")
         reply = self.backend.send_command("load_scan_plan", {"scan_plan": locked.scan_plan.to_dict()})
         if not reply.ok:
-            self._log("ERROR", f"加载扫查路径失败：{reply.message}")
+            self._log("ERROR", f"加载扫查路径失败：{reply.message}。会话保持锁定以便排查，不执行扫查启动链。")
+            self._emit_status()
             return
         for command in ["approach_prescan", "seek_contact", "start_scan"]:
-            reply = self.backend.send_command(command)
-            if not reply.ok:
-                self._log("ERROR", f"{command} 失败：{reply.message}")
+            if not self._run_scan_start_step(command):
                 return
+        self._log("INFO", "扫查启动链路已完成，系统进入自动扫查流程。")
         self.experiments_updated.emit(self.experiments)
+        self._emit_status()
 
     def pause_scan(self) -> None:
         self._send_or_warn("pause_scan")
@@ -318,6 +320,19 @@ class AppController(QObject):
         if not reply.ok:
             self._log("WARN", f"{command} 失败：{reply.message}")
         return reply
+
+    def _run_scan_start_step(self, command: str) -> bool:
+        reply = self.backend.send_command(command)
+        if reply.ok:
+            return True
+        self._log("ERROR", f"{command} 失败：{reply.message}")
+        retreat = self.backend.send_command("safe_retreat")
+        if retreat.ok:
+            self._log("WARN", f"{command} 失败后已自动请求安全退让。")
+        else:
+            self._log("ERROR", f"{command} 失败后安全退让也失败：{retreat.message}")
+        self._emit_status()
+        return False
 
     def _build_summary_payload(self) -> dict:
         return {

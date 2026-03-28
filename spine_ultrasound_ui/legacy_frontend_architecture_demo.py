@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-测试医疗级前端架构的核心组件
-验证事件总线、状态机、配置管理器和UI组件
+Legacy interactive demo for an early frontend architecture spike.
+Kept for historical reference and excluded from the default pytest surface.
 """
 
 import sys

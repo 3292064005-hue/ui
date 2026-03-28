@@ -3,7 +3,7 @@ set -e
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="$ROOT_DIR/cpp_robot_core/build_runtime"
-CORE_BIN="$BUILD_DIR/robot_core_main"
+CORE_BIN="$BUILD_DIR/spine_robot_core"
 
 cmake -S "$ROOT_DIR/cpp_robot_core" -B "$BUILD_DIR"
 cmake --build "$BUILD_DIR" -j

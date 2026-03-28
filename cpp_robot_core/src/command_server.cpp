@@ -1,4 +1,5 @@
 #include "robot_core/command_server.h"
+#include "robot_core/protobuf_protocol.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -6,12 +7,16 @@
 #include <unistd.h>
 
 #include <chrono>
-#include <cstring>
+#include <cstdlib>
+#include <filesystem>
+#include <initializer_list>
 #include <iostream>
-#include <openssl/ssl.h>
-#include <openssl/err.h>
+#include <string>
 
-#include "ipc_messages.pb.h"  // Generated protobuf header
+#include <openssl/err.h>
+#include <openssl/ssl.h>
+
+#include "json_utils.h"
 
 namespace robot_core {
 
@@ -39,105 +44,129 @@ int openServerSocket(int port) {
   return fd;
 }
 
+std::filesystem::path resolveTlsFile(
+    const char* env_name,
+    std::initializer_list<const char*> fallback_candidates) {
+  if (const char* env_value = std::getenv(env_name)) {
+    const std::filesystem::path env_path(env_value);
+    if (std::filesystem::exists(env_path)) {
+      return env_path;
+    }
+  }
+  for (const char* candidate : fallback_candidates) {
+    const std::filesystem::path path(candidate);
+    if (std::filesystem::exists(path)) {
+      return path;
+    }
+  }
+  return {};
+}
+
 SSL_CTX* createTLSContext() {
-  const SSL_METHOD* method = TLS_server_method();
-  SSL_CTX* ctx = SSL_CTX_new(method);
-  if (!ctx) {
+  const auto cert_path =
+      resolveTlsFile("ROBOT_CORE_TLS_CERT", {"configs/tls/robot_core_server.crt",
+                                              "../configs/tls/robot_core_server.crt",
+                                              "../../configs/tls/robot_core_server.crt"});
+  const auto key_path =
+      resolveTlsFile("ROBOT_CORE_TLS_KEY", {"configs/tls/robot_core_server.key",
+                                             "../configs/tls/robot_core_server.key",
+                                             "../../configs/tls/robot_core_server.key"});
+  if (cert_path.empty() || key_path.empty()) {
+    std::cerr << "TLS certificate or key not found. Set ROBOT_CORE_TLS_CERT / "
+                 "ROBOT_CORE_TLS_KEY or provide configs/tls/robot_core_server.*"
+              << std::endl;
+    return nullptr;
+  }
+
+  SSL_CTX* ctx = SSL_CTX_new(TLS_server_method());
+  if (ctx == nullptr) {
     std::cerr << "Unable to create SSL context" << std::endl;
     return nullptr;
   }
-
-  // Set TLS 1.3 only
   SSL_CTX_set_min_proto_version(ctx, TLS1_3_VERSION);
   SSL_CTX_set_max_proto_version(ctx, TLS1_3_VERSION);
+  SSL_CTX_set_mode(ctx, SSL_MODE_AUTO_RETRY);
 
-  // Load certificate and private key (self-signed for demo)
-  if (SSL_CTX_use_certificate_file(ctx, "server.crt", SSL_FILETYPE_PEM) <= 0) {
-    std::cerr << "Failed to load certificate" << std::endl;
+  if (SSL_CTX_use_certificate_file(ctx, cert_path.c_str(), SSL_FILETYPE_PEM) <= 0) {
+    std::cerr << "Failed to load TLS certificate from " << cert_path << std::endl;
     SSL_CTX_free(ctx);
     return nullptr;
   }
-
-  if (SSL_CTX_use_PrivateKey_file(ctx, "server.key", SSL_FILETYPE_PEM) <= 0) {
-    std::cerr << "Failed to load private key" << std::endl;
+  if (SSL_CTX_use_PrivateKey_file(ctx, key_path.c_str(), SSL_FILETYPE_PEM) <= 0) {
+    std::cerr << "Failed to load TLS private key from " << key_path << std::endl;
     SSL_CTX_free(ctx);
     return nullptr;
   }
-
+  if (SSL_CTX_check_private_key(ctx) != 1) {
+    std::cerr << "TLS private key does not match certificate" << std::endl;
+    SSL_CTX_free(ctx);
+    return nullptr;
+  }
   return ctx;
 }
 
-bool sendProtobufSSL(SSL* ssl, const google::protobuf::Message& msg) {
-  std::string serialized;
-  if (!msg.SerializeToString(&serialized)) {
+bool sendLengthPrefixedSSL(SSL* ssl, const google::protobuf::Message& msg) {
+  std::string payload;
+  if (!msg.SerializeToString(&payload)) {
     return false;
   }
-  // Send length prefix (4 bytes, big-endian)
-  uint32_t length = htonl(serialized.size());
-  if (SSL_write(ssl, &length, sizeof(length)) != sizeof(length)) {
+  const uint32_t length = htonl(static_cast<uint32_t>(payload.size()));
+  if (SSL_write(ssl, &length, sizeof(length)) != static_cast<int>(sizeof(length))) {
     return false;
   }
-  // Send message
-  int sent = 0;
-  while (sent < static_cast<int>(serialized.size())) {
-    int rc = SSL_write(ssl, serialized.data() + sent, serialized.size() - sent);
+  size_t sent = 0;
+  while (sent < payload.size()) {
+    const int rc = SSL_write(ssl, payload.data() + sent, static_cast<int>(payload.size() - sent));
     if (rc <= 0) {
       return false;
     }
-    sent += rc;
+    sent += static_cast<size_t>(rc);
   }
   return true;
 }
 
-bool receiveProtobufSSL(SSL* ssl, google::protobuf::Message& msg) {
-  // Receive length prefix
-  uint32_t length;
-  if (SSL_read(ssl, &length, sizeof(length)) != sizeof(length)) {
+bool receiveLengthPrefixedSSL(SSL* ssl, google::protobuf::Message& msg) {
+  uint32_t length_be = 0;
+  if (SSL_read(ssl, &length_be, sizeof(length_be)) != static_cast<int>(sizeof(length_be))) {
     return false;
   }
-  length = ntohl(length);
-  // Receive message
-  std::string serialized(length, '\0');
-  int received = 0;
-  while (received < static_cast<int>(length)) {
-    int rc = SSL_read(ssl, &serialized[received], length - received);
+  const uint32_t length = ntohl(length_be);
+  std::string payload(length, '\0');
+  size_t received = 0;
+  while (received < payload.size()) {
+    const int rc = SSL_read(ssl, payload.data() + received, static_cast<int>(payload.size() - received));
     if (rc <= 0) {
       return false;
     }
-    received += rc;
+    received += static_cast<size_t>(rc);
   }
-  return msg.ParseFromString(serialized);
+  return msg.ParseFromString(payload);
 }
 
-std::string CommandServer::handleCommandProtobuf(const spine_core::Command& cmd) {
-  // Convert protobuf command to JSON-like string for runtime
-  std::string json_cmd = "{";
-  json_cmd += "\"protocol_version\":" + std::to_string(cmd.protocol_version()) + ",";
-  json_cmd += "\"command\":\"" + cmd.command() + "\",";
-  json_cmd += "\"payload\":\"" + cmd.payload() + "\",";
-  json_cmd += "\"request_id\":" + std::to_string(cmd.request_id());
-  json_cmd += "}";
-  return runtime_.handleCommandJson(json_cmd);
+void closeTlsSocket(int fd, SSL* ssl) {
+  if (ssl != nullptr) {
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
+  }
+  if (fd >= 0) {
+    ::shutdown(fd, SHUT_RDWR);
+    ::close(fd);
+  }
 }
 
 }  // namespace
 
 CommandServer::CommandServer(int command_port, int telemetry_port)
     : command_port_(command_port), telemetry_port_(telemetry_port) {
-  // Initialize OpenSSL
   SSL_library_init();
   OpenSSL_add_all_algorithms();
   SSL_load_error_strings();
-
   ssl_ctx_ = createTLSContext();
-  if (!ssl_ctx_) {
-    std::cerr << "Failed to create TLS context" << std::endl;
-  }
 }
 
 CommandServer::~CommandServer() {
   stop();
-  if (ssl_ctx_) {
+  if (ssl_ctx_ != nullptr) {
     SSL_CTX_free(ssl_ctx_);
   }
 }
@@ -152,6 +181,11 @@ RobotCoreState CommandServer::state() const {
 }
 
 void CommandServer::spin() {
+  if (ssl_ctx_ == nullptr) {
+    std::cerr << "robot_core TLS context is unavailable, aborting startup" << std::endl;
+    return;
+  }
+
   command_server_fd_ = openServerSocket(command_port_);
   telemetry_server_fd_ = openServerSocket(telemetry_port_);
   if (command_server_fd_ < 0 || telemetry_server_fd_ < 0) {
@@ -159,8 +193,9 @@ void CommandServer::spin() {
     stop();
     return;
   }
-  std::cout << "robot_core command server on 0.0.0.0:" << command_port_ << std::endl;
-  std::cout << "robot_core telemetry server on 0.0.0.0:" << telemetry_port_ << std::endl;
+
+  std::cout << "spine_robot_core command server on 0.0.0.0:" << command_port_ << std::endl;
+  std::cout << "spine_robot_core telemetry server on 0.0.0.0:" << telemetry_port_ << std::endl;
 
   command_thread_ = std::thread(&CommandServer::commandAcceptLoop, this);
   telemetry_accept_thread_ = std::thread(&CommandServer::telemetryAcceptLoop, this);
@@ -189,14 +224,11 @@ void CommandServer::stop() {
     ::close(telemetry_server_fd_);
     telemetry_server_fd_ = -1;
   }
-  {
-    std::lock_guard<std::mutex> lock(telemetry_clients_mutex_);
-    for (int fd : telemetry_clients_) {
-      ::shutdown(fd, SHUT_RDWR);
-      ::close(fd);
-    }
-    telemetry_clients_.clear();
+  std::lock_guard<std::mutex> lock(telemetry_clients_mutex_);
+  for (auto& client : telemetry_clients_) {
+    closeTlsSocket(client.fd, client.ssl);
   }
+  telemetry_clients_.clear();
 }
 
 void CommandServer::commandAcceptLoop() {
@@ -209,45 +241,30 @@ void CommandServer::commandAcceptLoop() {
       continue;
     }
 
-    // Establish TLS connection
     SSL* ssl = SSL_new(ssl_ctx_);
-    if (!ssl) {
-      std::cerr << "Failed to create SSL object" << std::endl;
-      ::shutdown(client_fd, SHUT_RDWR);
-      ::close(client_fd);
+    if (ssl == nullptr) {
+      closeTlsSocket(client_fd, nullptr);
       continue;
     }
-
     SSL_set_fd(ssl, client_fd);
     if (SSL_accept(ssl) <= 0) {
-      std::cerr << "TLS handshake failed" << std::endl;
-      SSL_free(ssl);
-      ::shutdown(client_fd, SHUT_RDWR);
-      ::close(client_fd);
+      closeTlsSocket(client_fd, ssl);
       continue;
     }
 
-    spine_core::Command cmd;
-    if (!receiveProtobufSSL(ssl, cmd)) {
-      SSL_free(ssl);
-      ::shutdown(client_fd, SHUT_RDWR);
-      ::close(client_fd);
+    spine_core::Command command;
+    if (!receiveLengthPrefixedSSL(ssl, command)) {
+      closeTlsSocket(client_fd, ssl);
       continue;
     }
-    const auto reply_json = handleCommandProtobuf(cmd);
-    // Convert reply JSON to protobuf response (simplified)
-    spine_core::Command reply;
-    reply.set_protocol_version(1);
-    reply.set_command("response");
-    reply.set_payload(reply_json);
-    reply.set_request_id(cmd.request_id());
-    sendProtobufSSL(ssl, reply);
-    SSL_free(ssl);
-    ::shutdown(client_fd, SHUT_RDWR);
-    ::close(client_fd);
-    const auto lines = telemetry_publisher_.buildLines(runtime_.takeTelemetrySnapshot());
+
+    const auto reply = dispatchProtobufCommand(runtime_, command);
+    sendLengthPrefixedSSL(ssl, reply);
+    closeTlsSocket(client_fd, ssl);
+
+    const auto snapshot = telemetry_publisher_.buildProtobufMessages(runtime_.takeTelemetrySnapshot());
     std::lock_guard<std::mutex> lock(telemetry_clients_mutex_);
-    broadcastLocked(lines);
+    broadcastProtobufLocked(snapshot);
   }
 }
 
@@ -260,10 +277,23 @@ void CommandServer::telemetryAcceptLoop() {
       }
       continue;
     }
+
+    SSL* ssl = SSL_new(ssl_ctx_);
+    if (ssl == nullptr) {
+      closeTlsSocket(client_fd, nullptr);
+      continue;
+    }
+    SSL_set_fd(ssl, client_fd);
+    if (SSL_accept(ssl) <= 0) {
+      closeTlsSocket(client_fd, ssl);
+      continue;
+    }
+
     {
       std::lock_guard<std::mutex> lock(telemetry_clients_mutex_);
-      telemetry_clients_.push_back(client_fd);
-      broadcastLocked(telemetry_publisher_.buildLines(runtime_.takeTelemetrySnapshot()));
+      telemetry_clients_.push_back(TelemetryClient{client_fd, ssl});
+      const auto snapshot = telemetry_publisher_.buildProtobufMessages(runtime_.takeTelemetrySnapshot());
+      broadcastProtobufLocked(snapshot);
     }
   }
 }
@@ -300,28 +330,24 @@ void CommandServer::telemetryLoop() {
   }
 }
 
-void CommandServer::broadcastProtobufLocked(const std::vector<spine_core::RobotTelemetry>& messages) {
-  std::vector<int> alive;
+void CommandServer::broadcastProtobufLocked(const std::vector<spine_core::TelemetryEnvelope>& messages) {
+  std::vector<TelemetryClient> alive;
   alive.reserve(telemetry_clients_.size());
-  for (int fd : telemetry_clients_) {
+  for (auto& client : telemetry_clients_) {
     bool ok = true;
     for (const auto& msg : messages) {
-      if (!sendProtobuf(fd, msg)) {
+      if (!sendLengthPrefixedSSL(client.ssl, msg)) {
         ok = false;
         break;
       }
     }
     if (ok) {
-      alive.push_back(fd);
+      alive.push_back(client);
     } else {
-      ::shutdown(fd, SHUT_RDWR);
-      ::close(fd);
+      closeTlsSocket(client.fd, client.ssl);
     }
   }
   telemetry_clients_ = std::move(alive);
-}
-  }
-  telemetry_clients_.swap(alive);
 }
 
 }  // namespace robot_core

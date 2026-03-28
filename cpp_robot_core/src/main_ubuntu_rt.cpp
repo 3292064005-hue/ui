@@ -1,63 +1,64 @@
+#include <cerrno>
+#include <csignal>
+#include <cstring>
 #include <iostream>
-#include <sched.h>
 #include <pthread.h>
+#include <sched.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#include <cstring>
-#include <stdexcept>
-// #include "robot_core/rt_motion_service.h" // Assuming this is linked
-// #include "ipc/ipc_server.h"
 
-// Set true hardware affinity targeting Cores 0 and 1 (Assuming 'isolcpus=0,1' in GRUB)
-void pin_thread_to_isolated_cores() {
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    CPU_SET(0, &cpuset); // Dedicate Core 0
-    CPU_SET(1, &cpuset); // Dedicate Core 1
+#include "robot_core/command_server.h"
 
-    pthread_t current_thread = pthread_self();
-    if (pthread_setaffinity_np(current_thread, sizeof(cpu_set_t), &cpuset) != 0) {
-        std::cerr << "[Warning] Failed to set CPU affinity to isolated cores. Are you root?\n";
-    } else {
-        std::cout << "[RT-Core] System isolated to CPU 0,1 successfully.\n";
-    }
+namespace {
+
+robot_core::CommandServer* g_server = nullptr;
+
+void pinThreadToIsolatedCores() {
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  CPU_SET(0, &cpuset);
+  CPU_SET(1, &cpuset);
+
+  const pthread_t current_thread = pthread_self();
+  if (pthread_setaffinity_np(current_thread, sizeof(cpu_set_t), &cpuset) != 0) {
+    std::cerr << "[Warning] Failed to set CPU affinity to isolated cores. Are you root?" << std::endl;
+  } else {
+    std::cout << "[RT-Core] System isolated to CPU 0,1 successfully." << std::endl;
+  }
 }
 
-// Lock all current and future contiguous heap allocations to Physical RAM
-// Bypasses Linux Swap Partition causing micro-stutters
-void lock_memory_for_rt() {
-    if (mlockall(MCL_CURRENT | MCL_FUTURE) == -1) {
-        std::cerr << "[Warning] mlockall failed: " << strerror(errno) << " - Check LimitMEMLOCK in systemd!\n";
-    } else {
-        std::cout << "[RT-Core] Memory globally locked successfully. OS Page Faults eliminated.\n";
-    }
+void lockMemoryForRt() {
+  if (mlockall(MCL_CURRENT | MCL_FUTURE) == -1) {
+    std::cerr << "[Warning] mlockall failed: " << std::strerror(errno)
+              << " - Check LimitMEMLOCK in systemd!" << std::endl;
+  } else {
+    std::cout << "[RT-Core] Memory globally locked successfully. OS page faults eliminated." << std::endl;
+  }
 }
 
-int main(int argc, char* argv[]) {
-    std::cout << "Starting Spine Ultrasound C++ Hard-RT Core...\n";
+void handleSignal(int) {
+  if (g_server != nullptr) {
+    std::cout << "[spine_robot_core] shutdown requested" << std::endl;
+    g_server->stop();
+  }
+}
 
-    // 1. Hardware Privilege Setup
-    lock_memory_for_rt();
-    pin_thread_to_isolated_cores();
+}  // namespace
 
-    // 2. Instantiate dependencies 
-    // auto robot = std::make_shared<rokae::xMateErProRobot>(...);
-    // auto rt_service = std::make_shared<robot_core::RtMotionService>(robot);
+int main() {
+  std::cout << "Starting spine_robot_core..." << std::endl;
 
-    // 3. Boot 1kHz Command Receiver and Telemetry Publisher Threads
-    // (Pushing to/from the MoodyCamel lock-free queues exposed in rt_service)
-    // auto ipc_server = std::make_shared<ipc::IPCServer>(rt_service);
-    // ipc_server->start();
+  lockMemoryForRt();
+  pinThreadToIsolatedCores();
 
-    // 4. Engage Z-axis 10N Compliance Tracking 
-    // rt_service->startCartesianImpedance();
+  robot_core::CommandServer server;
+  g_server = &server;
+  std::signal(SIGINT, handleSignal);
+  std::signal(SIGTERM, handleSignal);
 
-    std::cout << "[RT-Core] System armed and streaming.\n";
+  server.spin();
 
-    // Main thread infinite hang until interupted
-    while (true) {
-        usleep(1000000); // 1Hz heartbeat idle
-    }
-
-    return 0;
+  g_server = nullptr;
+  std::cout << "spine_robot_core stopped" << std::endl;
+  return 0;
 }

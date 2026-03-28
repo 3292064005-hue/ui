@@ -22,15 +22,18 @@ public:
   void spin();
   void stop();
 private:
+  struct TelemetryClient {
+    int fd{-1};
+    SSL* ssl{nullptr};
+  };
+
   void commandAcceptLoop();
   void telemetryAcceptLoop();
   void rtLoop();
   void statePollLoop();
   void watchdogLoop();
   void telemetryLoop();
-  void broadcastLocked(const std::vector<std::string>& lines);
-  void broadcastProtobufLocked(const std::vector<spine_core::RobotTelemetry>& messages);
-  std::string handleCommandProtobuf(const spine_core::Command& cmd);
+  void broadcastProtobufLocked(const std::vector<spine_core::TelemetryEnvelope>& messages);
 
   RobotCoreState state_{RobotCoreState::Boot};
   int command_port_{5656};
@@ -39,7 +42,7 @@ private:
   int command_server_fd_{-1};
   int telemetry_server_fd_{-1};
   mutable std::mutex telemetry_clients_mutex_;
-  std::vector<int> telemetry_clients_;
+  std::vector<TelemetryClient> telemetry_clients_;
   CoreRuntime runtime_{};
   TelemetryPublisher telemetry_publisher_{};
   std::thread command_thread_;

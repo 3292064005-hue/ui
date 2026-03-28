@@ -9,16 +9,16 @@ RecoveryManager::RecoveryManager() = default;
 
 RecoveryManager::~RecoveryManager() {
   cancelRetry();
-  if (retry_thread_.joinable()) {
-    retry_thread_.join();
-  }
+  joinRetryThreadIfNeeded();
 }
 
 void RecoveryManager::pauseAndHold() {
+  pause_hold_active_.store(true);
   retreat_completed_ = false;
 }
 
 void RecoveryManager::controlledRetract() {
+  pause_hold_active_.store(false);
   retreat_completed_ = true;
 }
 
@@ -26,15 +26,17 @@ bool RecoveryManager::retreatCompleted() const {
   return retreat_completed_;
 }
 
+bool RecoveryManager::pauseHoldActive() const {
+  return pause_hold_active_.load();
+}
+
 void RecoveryManager::setRetryCallback(RetryFunction callback) {
   retry_callback_ = std::move(callback);
 }
 
 void RecoveryManager::triggerRetry(int max_attempts, std::chrono::milliseconds delay) {
-  if (retry_active_.load()) {
-    return;  // Already retrying
-  }
-
+  cancelRetry();
+  joinRetryThreadIfNeeded();
   max_attempts_ = max_attempts;
   retry_delay_ = delay;
   retry_active_.store(true);
@@ -44,6 +46,16 @@ void RecoveryManager::triggerRetry(int max_attempts, std::chrono::milliseconds d
 
 void RecoveryManager::cancelRetry() {
   retry_active_.store(false);
+}
+
+bool RecoveryManager::retryActive() const {
+  return retry_active_.load();
+}
+
+void RecoveryManager::joinRetryThreadIfNeeded() {
+  if (retry_thread_.joinable() && retry_thread_.get_id() != std::this_thread::get_id()) {
+    retry_thread_.join();
+  }
 }
 
 void RecoveryManager::retryLoop() {
@@ -58,6 +70,8 @@ void RecoveryManager::retryLoop() {
 
     if (retry_callback_ && retry_callback_()) {
       std::cout << "RecoveryManager: Retry succeeded on attempt " << attempt << std::endl;
+      pause_hold_active_.store(false);
+      retreat_completed_ = true;
       retry_active_.store(false);
       return;
     }

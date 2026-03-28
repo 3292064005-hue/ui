@@ -197,7 +197,9 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
     if (execution_state_ != RobotCoreState::Approaching && execution_state_ != RobotCoreState::PathValidated) {
       return replyJson(request_id, false, "cannot seek contact from current state");
     }
-    rt_motion_service_.seekContact();
+    if (!rt_motion_service_.seekContact()) {
+      return replyJson(request_id, false, "seek_contact failed");
+    }
     execution_state_ = RobotCoreState::ContactSeeking;
     contact_state_.mode = "SEEKING_CONTACT";
     contact_state_.recommended_action = "START_SCAN";
@@ -208,7 +210,9 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
         execution_state_ != RobotCoreState::PausedHold) {
       return replyJson(request_id, false, "cannot start scan from current state");
     }
-    rt_motion_service_.startCartesianImpedance();
+    if (!rt_motion_service_.startCartesianImpedance()) {
+      return replyJson(request_id, false, "start_scan failed");
+    }
     execution_state_ = RobotCoreState::Scanning;
     contact_state_.mode = "STABLE_CONTACT";
     contact_state_.recommended_action = "SCAN";
@@ -218,6 +222,7 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
     if (execution_state_ != RobotCoreState::Scanning) {
       return replyJson(request_id, false, "scan not active");
     }
+    rt_motion_service_.pauseAndHold();
     recovery_manager_.pauseAndHold();
     execution_state_ = RobotCoreState::PausedHold;
     contact_state_.mode = "HOLDING_CONTACT";
@@ -228,6 +233,10 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
     if (execution_state_ != RobotCoreState::PausedHold) {
       return replyJson(request_id, false, "scan not paused");
     }
+    if (!rt_motion_service_.startCartesianImpedance()) {
+      return replyJson(request_id, false, "resume_scan failed");
+    }
+    recovery_manager_.cancelRetry();
     execution_state_ = RobotCoreState::Scanning;
     contact_state_.mode = "STABLE_CONTACT";
     contact_state_.recommended_action = "SCAN";
@@ -237,7 +246,9 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
     if (execution_state_ == RobotCoreState::Boot || execution_state_ == RobotCoreState::Disconnected || execution_state_ == RobotCoreState::Estop) {
       return replyJson(request_id, false, "cannot retreat from current state");
     }
+    rt_motion_service_.controlledRetract();
     nrt_motion_service_.safeRetreat();
+    recovery_manager_.controlledRetract();
     execution_state_ = RobotCoreState::Retreating;
     retreat_ticks_remaining_ = 30;
     contact_state_.mode = "NO_CONTACT";
@@ -257,6 +268,8 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
     return replyJson(request_id, true, "clear_fault accepted");
   }
   if (command == "emergency_stop") {
+    rt_motion_service_.stop();
+    recovery_manager_.cancelRetry();
     execution_state_ = RobotCoreState::Estop;
     fault_code_ = "ESTOP";
     queueAlarmLocked("FATAL_FAULT", "safety", "急停触发");
@@ -357,6 +370,8 @@ void CoreRuntime::watchdogStep() {
   std::lock_guard<std::mutex> lock(mutex_);
   const auto safety = evaluateSafetyLocked();
   if (pressure_current_ > config_.pressure_upper && execution_state_ == RobotCoreState::Scanning) {
+    rt_motion_service_.pauseAndHold();
+    recovery_manager_.pauseAndHold();
     execution_state_ = RobotCoreState::PausedHold;
     contact_state_.mode = "OVERPRESSURE";
     contact_state_.recommended_action = "CONTROLLED_RETRACT";

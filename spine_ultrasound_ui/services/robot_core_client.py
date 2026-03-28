@@ -14,13 +14,26 @@ from spine_ultrasound_ui.utils import ensure_dir, now_text
 
 from .backend_base import BackendBase
 from .ipc_protocol import CommandEnvelope, ReplyEnvelope, TelemetryEnvelope
+from .protobuf_transport import (
+    DEFAULT_TLS_SERVER_NAME,
+    create_client_ssl_context,
+    recv_length_prefixed_message,
+    send_length_prefixed_message,
+)
 
 
 class RobotCoreClientBackend(QObject, BackendBase):
     telemetry_received = Signal(object)
     log_generated = Signal(str, str)
 
-    def __init__(self, root_dir: Path, command_host: str = "127.0.0.1", command_port: int = 5656, telemetry_host: str = "127.0.0.1", telemetry_port: int = 5657):
+    def __init__(
+        self,
+        root_dir: Path,
+        command_host: str = "127.0.0.1",
+        command_port: int = 5656,
+        telemetry_host: str = "127.0.0.1",
+        telemetry_port: int = 5657,
+    ):
         super().__init__()
         self.root_dir = ensure_dir(root_dir)
         self.command_host = command_host
@@ -30,10 +43,17 @@ class RobotCoreClientBackend(QObject, BackendBase):
         self.config = RuntimeConfig()
         self._telemetry_thread: Optional[threading.Thread] = None
         self._telemetry_stop = threading.Event()
+        self._ssl_context = create_client_ssl_context()
 
     def start(self) -> None:
         self._start_telemetry_loop()
-        self._log("INFO", f"RobotCoreClientBackend 已启动，命令通道 {self.command_host}:{self.command_port}，遥测通道 {self.telemetry_host}:{self.telemetry_port}")
+        self._log(
+            "INFO",
+            (
+                f"RobotCoreClientBackend 已启动，命令通道 {self.command_host}:{self.command_port} "
+                f"(TLS/Protobuf)，遥测通道 {self.telemetry_host}:{self.telemetry_port} (TLS/Protobuf)"
+            ),
+        )
 
     def update_runtime_config(self, config: RuntimeConfig) -> None:
         self.config = config
@@ -42,16 +62,18 @@ class RobotCoreClientBackend(QObject, BackendBase):
     def send_command(self, command: str, payload: Optional[dict] = None) -> ReplyEnvelope:
         env = CommandEnvelope(command=command, payload=payload or {}, request_id=uuid.uuid4().hex)
         try:
-            with socket.create_connection((self.command_host, self.command_port), timeout=1.5) as sock:
-                sock.settimeout(2.0)
-                sock.sendall((env.to_json() + "\n").encode("utf-8"))
-                file = sock.makefile("r", encoding="utf-8")
-                line = file.readline().strip()
-                if not line:
-                    raise RuntimeError("empty response")
-                reply = ReplyEnvelope.from_json(line)
-                self._log("INFO", f"{command}: {reply.message or ('OK' if reply.ok else 'FAILED')}")
-                return reply
+            from . import ipc_messages_pb2
+
+            with socket.create_connection((self.command_host, self.command_port), timeout=1.5) as raw_sock:
+                raw_sock.settimeout(2.0)
+                with self._ssl_context.wrap_socket(raw_sock, server_hostname=DEFAULT_TLS_SERVER_NAME) as tls_sock:
+                    send_length_prefixed_message(tls_sock, env.to_protobuf().SerializeToString())
+                    payload_bytes = recv_length_prefixed_message(tls_sock)
+            reply_proto = ipc_messages_pb2.Reply()
+            reply_proto.ParseFromString(payload_bytes)
+            reply = ReplyEnvelope.from_protobuf(reply_proto)
+            self._log("INFO", f"{command}: {reply.message or ('OK' if reply.ok else 'FAILED')}")
+            return reply
         except Exception as exc:
             self._log("ERROR", f"{command}: {exc}")
             return ReplyEnvelope(ok=False, message=str(exc), data={})
@@ -70,21 +92,19 @@ class RobotCoreClientBackend(QObject, BackendBase):
         self._telemetry_thread.start()
 
     def _telemetry_loop(self) -> None:
+        from . import ipc_messages_pb2
+
         while not self._telemetry_stop.is_set():
             try:
-                with socket.create_connection((self.telemetry_host, self.telemetry_port), timeout=1.0) as sock:
-                    sock.settimeout(1.0)
-                    self._log("INFO", "已连接 robot_core 遥测通道。")
-                    file = sock.makefile("r", encoding="utf-8")
-                    while not self._telemetry_stop.is_set():
-                        line = file.readline()
-                        if not line:
-                            break
-                        try:
-                            self.telemetry_received.emit(TelemetryEnvelope.from_json(line.strip()))
-                        except RuntimeError:
-                            self._telemetry_stop.set()
-                            break
+                with socket.create_connection((self.telemetry_host, self.telemetry_port), timeout=1.0) as raw_sock:
+                    raw_sock.settimeout(2.0)
+                    with self._ssl_context.wrap_socket(raw_sock, server_hostname=DEFAULT_TLS_SERVER_NAME) as tls_sock:
+                        self._log("INFO", "已连接 robot_core 遥测通道。")
+                        while not self._telemetry_stop.is_set():
+                            message_bytes = recv_length_prefixed_message(tls_sock)
+                            proto = ipc_messages_pb2.TelemetryEnvelope()
+                            proto.ParseFromString(message_bytes)
+                            self.telemetry_received.emit(TelemetryEnvelope.from_protobuf(proto))
             except OSError:
                 if not self._telemetry_stop.is_set():
                     time.sleep(1.0)

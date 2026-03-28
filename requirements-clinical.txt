@@ -21,3 +21,4 @@ aiortc>=1.6.0     # For native GStreamer WebRTC proxy (No-CPU video)
 # Enterprise Clinical Logging & PACS
 pydicom>=2.4.1
 loguru>=0.7.0     # Async non-blocking log ingestion
+protobuf>=3.20.3,<4

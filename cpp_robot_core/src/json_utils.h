@@ -123,6 +123,64 @@ inline int extractInt(const std::string& json_line, const std::string& key, int 
   return fallback;
 }
 
+inline bool extractBool(const std::string& json_line, const std::string& key, bool fallback = false) {
+  const std::regex re("\"" + key + "\"\\s*:\\s*(true|false)");
+  std::smatch match;
+  if (std::regex_search(json_line, match, re)) {
+    return match[1].str() == "true";
+  }
+  return fallback;
+}
+
+inline std::string extractObject(const std::string& json_line, const std::string& key, const std::string& fallback = "{}") {
+  const auto token = "\"" + key + "\"";
+  auto key_pos = json_line.find(token);
+  if (key_pos == std::string::npos) {
+    return fallback;
+  }
+  auto colon_pos = json_line.find(':', key_pos + token.size());
+  if (colon_pos == std::string::npos) {
+    return fallback;
+  }
+  auto start = json_line.find_first_not_of(" \t\r\n", colon_pos + 1);
+  if (start == std::string::npos) {
+    return fallback;
+  }
+  if (json_line[start] != '{') {
+    return fallback;
+  }
+  int depth = 0;
+  bool in_string = false;
+  bool escaped = false;
+  for (size_t idx = start; idx < json_line.size(); ++idx) {
+    const char ch = json_line[idx];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch == '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch == '"') {
+      in_string = !in_string;
+      continue;
+    }
+    if (in_string) {
+      continue;
+    }
+    if (ch == '{') {
+      ++depth;
+    } else if (ch == '}') {
+      --depth;
+      if (depth == 0) {
+        return json_line.substr(start, idx - start + 1);
+      }
+    }
+  }
+  return fallback;
+}
+
 inline size_t countToken(const std::string& json_line, const std::string& token) {
   size_t count = 0;
   size_t pos = 0;

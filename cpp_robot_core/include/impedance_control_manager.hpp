@@ -17,7 +17,7 @@ struct ForceControlLimits {
     double max_z_force_n = 35.0;        // Maximum Z-axis force (red line)
     double warning_z_force_n = 25.0;    // Warning threshold
     double min_z_force_n = 5.0;         // Minimum contact force
-    double max_xy_force_n = 15.0;       // Maximum lateral force
+    double max_xy_force_n = 20.0;       // Maximum lateral force
     double emergency_retract_mm = 50.0; // Emergency retract distance
     double force_filter_cutoff_hz = 50.0; // Force signal filter cutoff
 };
@@ -112,16 +112,16 @@ public:
 
     // Configure impedance parameters
     bool configureImpedance(const CartesianImpedanceParams& params) {
-        std::lock_guard<std::mutex> lock(control_mutex_);
-        params_ = params;
-
         // Validate parameters
         for (size_t i = 0; i < 6; ++i) {
-            if (params_.stiffness[i] < 0.0 || params_.damping[i] < 0.0) {
+            if (params.stiffness[i] < 0.0 || params.damping[i] < 0.0) {
                 std::cerr << "[ERROR] Invalid impedance parameters: negative stiffness/damping" << std::endl;
                 return false;
             }
         }
+
+        std::lock_guard<std::mutex> lock(control_mutex_);
+        params_ = params;
 
         std::cout << "[IMPEDANCE] Configured stiffness: ["
                   << params_.stiffness[0] << ", " << params_.stiffness[1] << ", " << params_.stiffness[2] << ", "
@@ -134,8 +134,18 @@ public:
     // Set desired contact force (Z-axis)
     void setDesiredContactForce(double force_n) {
         std::lock_guard<std::mutex> lock(control_mutex_);
-        params_.desired_wrench[2] = -std::abs(force_n); // Negative for downward force
+        params_.desired_wrench = {0.0, 0.0, -std::abs(force_n), 0.0, 0.0, 0.0};
         std::cout << "[IMPEDANCE] Set desired contact force: " << force_n << "N" << std::endl;
+    }
+
+    // Set full desired wrench for RT control code paths.
+    void setDesiredWrench(const std::array<double, 6>& wrench) {
+        std::lock_guard<std::mutex> lock(control_mutex_);
+        params_.desired_wrench = wrench;
+        std::cout << "[IMPEDANCE] Set desired wrench: ["
+                  << wrench[0] << ", " << wrench[1] << ", " << wrench[2] << ", "
+                  << wrench[3] << ", " << wrench[4] << ", " << wrench[5] << "]"
+                  << std::endl;
     }
 
     // Real-time safety check and control
@@ -166,6 +176,8 @@ public:
     const CartesianImpedanceParams& getParams() const { return params_; }
     const ForceCircuitBreaker& getCircuitBreaker() const { return circuit_breaker_; }
     ForceCircuitBreaker& getCircuitBreaker() { return circuit_breaker_; }
+    const ForceCircuitBreaker& getForceCircuitBreaker() const { return circuit_breaker_; }
+    ForceCircuitBreaker& getForceCircuitBreaker() { return circuit_breaker_; }
 };
 
 } // namespace robot_core

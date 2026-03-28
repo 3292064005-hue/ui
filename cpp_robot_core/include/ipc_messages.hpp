@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-namespace spine_core {
+namespace spine_core_pod {
 
 // For maximal zero-copy performance across C++ and Python over ZMQ UDP/TCP,
 // we define strict Plain Old Data (POD) structs. These map perfectly to Python's struct.unpack.
@@ -30,6 +30,6 @@ struct RobotTelemetry {
 
 #pragma pack(pop)
 
-} // namespace spine_core
+} // namespace spine_core_pod
 
 #endif // IPC_MESSAGES_HPP

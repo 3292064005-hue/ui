@@ -127,17 +127,24 @@ bool RtMotionService::startCartesianImpedance() {
     adaptive_timer_->start();
 
     // Initialize impedance control manager with medical safety parameters
-    impedance_manager_->configureImpedance({
+    CartesianImpedanceParams params;
+    params.stiffness = {
         1500.0,  // X stiffness (N/m) - very stiff for lateral control
-        1500.0,  // Y stiffness (N/m) - very stiff for lateral control  
+        1500.0,  // Y stiffness (N/m) - very stiff for lateral control
         20.0,    // Z stiffness (N/m) - compliant for contact
-        100.0,   // RX damping (Nm/rad)
-        100.0,   // RY damping (Nm/rad)
-        100.0    // RZ damping (Nm/rad)
-    });
-    
+        100.0,   // RX stiffness
+        100.0,   // RY stiffness
+        100.0    // RZ stiffness
+    };
+    params.damping = {50.0, 50.0, 10.0, 20.0, 20.0, 20.0};
+    if (!impedance_manager_->configureImpedance(params)) {
+        is_running_ = false;
+        return false;
+    }
+
     // Set desired force for ultrasound contact (10N downward pressure)
     impedance_manager_->setDesiredWrench({0.0, 0.0, -10.0, 0.0, 0.0, 0.0});
+    impedance_manager_->activateImpedance();
 
     /*
      * std::function<rokae::CartesianPosition()> callback = [&]() -> rokae::CartesianPosition {
@@ -201,6 +208,7 @@ void RtMotionService::controlledRetract() {
     
     // Emergency stop - remove all forces and lift safely
     impedance_manager_->setDesiredWrench({0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
+    impedance_manager_->deactivateImpedance();
     
     // Command the robot upward by +10cm relative to the path Z axis securely.
     /*
@@ -215,6 +223,7 @@ void RtMotionService::controlledRetract() {
 
 void RtMotionService::stop() {
     is_running_ = false;
+    impedance_manager_->deactivateImpedance();
     /*
      * auto rtCon = robot_->getRtMotionController().lock();
      * if(rtCon) {
@@ -225,12 +234,21 @@ void RtMotionService::stop() {
 }
 
 bool RtMotionService::seekContact() { 
-    // Superceded by startCartesianImpedance() native pressure
+    if (!impedance_manager_) {
+        return false;
+    }
+    impedance_manager_->setDesiredContactForce(10.0);
+    impedance_manager_->activateImpedance();
     return true; 
 }
 
 void RtMotionService::pauseAndHold() {
-    // Sets pressure to 0 and stops command digestion while maintaining stiff posture.
+    if (!impedance_manager_) {
+        return;
+    }
+    // Hold posture while releasing contact force demand.
+    impedance_manager_->setDesiredContactForce(0.0);
+    impedance_manager_->activateImpedance();
 }
 
 } // namespace robot_core

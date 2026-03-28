@@ -35,13 +35,13 @@ private:
 
 class RtMotionService {
 public:
-    explicit RtMotionService(std::shared_ptr<rokae::xMateErProRobot> robot);
+    explicit RtMotionService(std::shared_ptr<rokae::xMateErProRobot> robot = nullptr);
     ~RtMotionService();
 
     // SPSC Queues exposed for IPC Server background thread insertion/extraction
     // Ensures absolutely zero locks between ZMQ Network & 1ms SDK Callback
-    spine_core::SPSCQueue<spine_core::CommandPose> cmd_queue{100};
-    spine_core::SPSCQueue<spine_core::RobotTelemetry> telemetry_queue{100};
+    spine_core::SPSCQueue<spine_core_pod::CommandPose> cmd_queue{100};
+    spine_core::SPSCQueue<spine_core_pod::RobotTelemetry> telemetry_queue{100};
 
     // Main routine to engage the 10N path tracking Real-Time loop
     bool startCartesianImpedance();
@@ -60,7 +60,7 @@ private:
     std::atomic<bool> is_running_{false};
     
     // Stores the last valid command for timeout checks
-    spine_core::CommandPose current_target_{};
+    spine_core_pod::CommandPose current_target_{};
     
     // Adaptive timer for dynamic frequency control
     std::unique_ptr<AdaptiveTimer> adaptive_timer_;

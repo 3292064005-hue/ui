@@ -7,6 +7,6 @@ namespace robot_core {
 class TelemetryPublisher {
 public:
   std::vector<std::string> buildLines(const TelemetrySnapshot& snapshot) const;
-  std::vector<spine_core::RobotTelemetry> buildProtobufMessages(const TelemetrySnapshot& snapshot) const;
+  std::vector<spine_core::TelemetryEnvelope> buildProtobufMessages(const TelemetrySnapshot& snapshot) const;
 };
 }
