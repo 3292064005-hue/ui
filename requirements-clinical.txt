@@ -1,0 +1,23 @@
+# Spine Ultrasound Platform - Clinical Edition (Ubuntu 22.04 + RTX 4060)
+
+# Core & Math
+numpy>=1.23.0,<2.0.0
+scipy>=1.9.0
+h5py>=3.7.0
+
+# Asynchronous Communications & Headless Backend
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+websockets>=11.0.3
+pyzmq>=25.1.0
+
+# Hardware Accelerated AI & Reconstruction
+open3d>=0.17.0
+tensorrt>=8.6.1   # Requires NVIDIA Driver + CUDA Toolkit
+pycuda>=2022.2.2  # For Pinned Memory & Zero-Copy transfers
+opencv-python-headless>=4.8.0 # For ArUco & V4L2 WebRTC passthrough
+aiortc>=1.6.0     # For native GStreamer WebRTC proxy (No-CPU video)
+
+# Enterprise Clinical Logging & PACS
+pydicom>=2.4.1
+loguru>=0.7.0     # Async non-blocking log ingestion

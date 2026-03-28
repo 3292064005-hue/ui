@@ -1,0 +1,7 @@
+robot_type: xmate_er3
+remote_ip: 192.168.0.160
+local_ip: 192.168.0.100
+tcp_name: ultrasound_probe
+work_object: patient_spine
+load_mass: 0.85
+network_tolerance: 15

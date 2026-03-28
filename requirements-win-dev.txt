@@ -1,0 +1,21 @@
+# Spine Ultrasound Platform - Windows Pure UI Mockup Environment
+# Safe for Python 3.13 / Windows 11
+
+# Core & Math
+numpy>=1.23.0
+scipy>=1.9.0
+h5py>=3.7.0
+
+# Asynchronous Communications & Headless Backend
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+websockets>=11.0.3
+pyzmq>=25.1.0
+
+# Enterprise Clinical Logging & PACS
+pydicom>=2.4.1
+loguru>=0.7.0     # Async non-blocking log ingestion
+
+# MOCKING LIBRARIES (Bypassing OpenCV WebRTC for pure Mock UI testing)
+opencv-python-headless>=4.8.0 # Re-enabled for Real-Time Webcam Test
+# aiortc>=1.6.0 # Disabled for Pure UI Test
