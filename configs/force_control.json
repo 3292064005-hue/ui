@@ -1,0 +1,8 @@
+{
+  "max_z_force_n": 35.0,
+  "warning_z_force_n": 25.0,
+  "max_xy_force_n": 20.0,
+  "desired_contact_force_n": 10.0,
+  "emergency_retract_mm": 50.0,
+  "force_filter_cutoff_hz": 30.0
+}

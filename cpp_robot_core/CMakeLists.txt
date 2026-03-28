@@ -18,6 +18,7 @@ find_package(Protobuf REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(Eigen3 REQUIRED)
 enable_testing()
+add_compile_definitions(ROBOT_CORE_FORCE_CONTROL_CONFIG_PATH="${CMAKE_SOURCE_DIR}/../configs/force_control.json")
 
 # Protobuf generation
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS proto/ipc_messages.proto)

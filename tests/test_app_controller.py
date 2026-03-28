@@ -107,3 +107,59 @@ def test_app_controller_requests_safe_retreat_if_scan_start_chain_fails(tmp_path
 
     assert "safe_retreat" in backend.commands
     assert controller.workflow_artifacts.session_locked is True
+
+
+def test_app_controller_keeps_session_locked_if_load_scan_plan_fails(tmp_path):
+    class LoadPlanFailBackend(MockBackend):
+        def __init__(self, root_dir: Path):
+            super().__init__(root_dir)
+            self.commands: list[str] = []
+
+        def send_command(self, command, payload=None):
+            self.commands.append(command)
+            if command == "load_scan_plan":
+                return ReplyEnvelope(ok=False, message="invalid plan", data={})
+            return super().send_command(command, payload)
+
+    _app()
+    backend = LoadPlanFailBackend(Path(tmp_path))
+    controller = AppController(Path(tmp_path), backend)
+    controller.connect_robot()
+    controller.power_on()
+    controller.set_auto_mode()
+    controller.create_experiment()
+    controller.run_localization()
+    controller.generate_path()
+    controller.start_scan()
+
+    assert controller.workflow_artifacts.session_locked is True
+    assert controller.session_service.current_session_dir is not None
+    assert "approach_prescan" not in backend.commands
+
+
+def test_app_controller_requests_safe_retreat_if_pause_scan_fails(tmp_path):
+    class PauseFailBackend(MockBackend):
+        def __init__(self, root_dir: Path):
+            super().__init__(root_dir)
+            self.commands: list[str] = []
+
+        def send_command(self, command, payload=None):
+            self.commands.append(command)
+            if command == "pause_scan":
+                return ReplyEnvelope(ok=False, message="pause failed", data={})
+            return super().send_command(command, payload)
+
+    _app()
+    backend = PauseFailBackend(Path(tmp_path))
+    controller = AppController(Path(tmp_path), backend)
+    controller.connect_robot()
+    controller.power_on()
+    controller.set_auto_mode()
+    controller.create_experiment()
+    controller.run_localization()
+    controller.generate_path()
+    controller.start_scan()
+    controller.pause_scan()
+
+    assert backend.commands.count("safe_retreat") >= 1
+    assert controller.workflow_artifacts.session_locked is True

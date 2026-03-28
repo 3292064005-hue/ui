@@ -10,17 +10,9 @@
 #include <iostream>
 #include <cmath>
 
-namespace robot_core {
+#include "robot_core/force_control_config.h"
 
-// Force control safety parameters
-struct ForceControlLimits {
-    double max_z_force_n = 35.0;        // Maximum Z-axis force (red line)
-    double warning_z_force_n = 25.0;    // Warning threshold
-    double min_z_force_n = 5.0;         // Minimum contact force
-    double max_xy_force_n = 20.0;       // Maximum lateral force
-    double emergency_retract_mm = 50.0; // Emergency retract distance
-    double force_filter_cutoff_hz = 50.0; // Force signal filter cutoff
-};
+namespace robot_core {
 
 // Cartesian impedance parameters
 struct CartesianImpedanceParams {
@@ -38,7 +30,7 @@ private:
     mutable std::mutex safety_mutex_;
 
 public:
-    explicit ForceCircuitBreaker(const ForceControlLimits& limits = ForceControlLimits())
+    explicit ForceCircuitBreaker(const ForceControlLimits& limits = loadForceControlLimits())
         : limits_(limits) {}
 
     // Real-time force checking (called every 1ms in control loop)
@@ -107,7 +99,7 @@ private:
 
 public:
     explicit ImpedanceControlManager(const CartesianImpedanceParams& params = CartesianImpedanceParams(),
-                                   const ForceControlLimits& limits = ForceControlLimits())
+                                   const ForceControlLimits& limits = loadForceControlLimits())
         : params_(params), circuit_breaker_(limits) {}
 
     // Configure impedance parameters

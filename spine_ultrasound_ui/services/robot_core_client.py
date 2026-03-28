@@ -3,7 +3,6 @@ from __future__ import annotations
 import socket
 import threading
 import time
-import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -13,13 +12,9 @@ from spine_ultrasound_ui.models import RuntimeConfig
 from spine_ultrasound_ui.utils import ensure_dir, now_text
 
 from .backend_base import BackendBase
-from .ipc_protocol import CommandEnvelope, ReplyEnvelope, TelemetryEnvelope
-from .protobuf_transport import (
-    DEFAULT_TLS_SERVER_NAME,
-    create_client_ssl_context,
-    recv_length_prefixed_message,
-    send_length_prefixed_message,
-)
+from .core_transport import parse_telemetry_payload, send_tls_command
+from .ipc_protocol import ReplyEnvelope, TelemetryEnvelope
+from .protobuf_transport import DEFAULT_TLS_SERVER_NAME, create_client_ssl_context, recv_length_prefixed_message
 
 
 class RobotCoreClientBackend(QObject, BackendBase):
@@ -60,18 +55,14 @@ class RobotCoreClientBackend(QObject, BackendBase):
         self._log("INFO", "运行时配置已同步到 AppController。")
 
     def send_command(self, command: str, payload: Optional[dict] = None) -> ReplyEnvelope:
-        env = CommandEnvelope(command=command, payload=payload or {}, request_id=uuid.uuid4().hex)
         try:
-            from . import ipc_messages_pb2
-
-            with socket.create_connection((self.command_host, self.command_port), timeout=1.5) as raw_sock:
-                raw_sock.settimeout(2.0)
-                with self._ssl_context.wrap_socket(raw_sock, server_hostname=DEFAULT_TLS_SERVER_NAME) as tls_sock:
-                    send_length_prefixed_message(tls_sock, env.to_protobuf().SerializeToString())
-                    payload_bytes = recv_length_prefixed_message(tls_sock)
-            reply_proto = ipc_messages_pb2.Reply()
-            reply_proto.ParseFromString(payload_bytes)
-            reply = ReplyEnvelope.from_protobuf(reply_proto)
+            reply = send_tls_command(
+                self.command_host,
+                self.command_port,
+                self._ssl_context,
+                command,
+                payload,
+            )
             self._log("INFO", f"{command}: {reply.message or ('OK' if reply.ok else 'FAILED')}")
             return reply
         except Exception as exc:
@@ -92,8 +83,6 @@ class RobotCoreClientBackend(QObject, BackendBase):
         self._telemetry_thread.start()
 
     def _telemetry_loop(self) -> None:
-        from . import ipc_messages_pb2
-
         while not self._telemetry_stop.is_set():
             try:
                 with socket.create_connection((self.telemetry_host, self.telemetry_port), timeout=1.0) as raw_sock:
@@ -102,9 +91,7 @@ class RobotCoreClientBackend(QObject, BackendBase):
                         self._log("INFO", "已连接 robot_core 遥测通道。")
                         while not self._telemetry_stop.is_set():
                             message_bytes = recv_length_prefixed_message(tls_sock)
-                            proto = ipc_messages_pb2.TelemetryEnvelope()
-                            proto.ParseFromString(message_bytes)
-                            self.telemetry_received.emit(TelemetryEnvelope.from_protobuf(proto))
+                            self.telemetry_received.emit(parse_telemetry_payload(message_bytes))
             except OSError:
                 if not self._telemetry_stop.is_set():
                     time.sleep(1.0)

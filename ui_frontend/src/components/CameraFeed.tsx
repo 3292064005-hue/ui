@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { Camera, Maximize2, Download, XCircle } from 'lucide-react';
+import { wsUrl } from '../api/config';
 
 export default function CameraFeed() {
   const [frame, setFrame] = useState<string | null>(null);
@@ -21,11 +22,11 @@ export default function CameraFeed() {
 
   useEffect(() => {
     const connect = () => {
-      const ws = new WebSocket('ws://127.0.0.1:8000/ws/camera');
+      const ws = new WebSocket(wsUrl('/ws/camera'));
       wsRef.current = ws;
       ws.onopen = () => setConnected(true);
       ws.onmessage = (event) => {
-        setFrame(`data:image/jpeg;base64,${event.data}`);
+        setFrame(`data:image/png;base64,${event.data}`);
         fpsCountRef.current++;
       };
       ws.onclose = () => {

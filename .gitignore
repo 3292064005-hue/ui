@@ -4,6 +4,7 @@
 
 # 1. C++ & CMake Build Artifacts
 cpp_robot_core/build/
+cpp_robot_core/build_runtime/
 build/
 CMakeCache.txt
 CMakeFiles/
@@ -36,6 +37,10 @@ env/
 htmlcov/
 dist/
 spine_ultrasound_workspace/
+ui_frontend/node_modules/
+ui_frontend/dist/
+ui_frontend/.vite/
+ui_frontend/*.tsbuildinfo
 
 # 3. IDEs & Editors
 .vscode/

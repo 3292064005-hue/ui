@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 class UltrasoundIngestionProcess(SensorIngestionProcess):
     """
     Sub-process to grab frames from the Ultrasound device.
-    Example uses DirectShow or standard V4L2 video capture index.
+    Uses the Ubuntu 22.04 V4L2 video capture path.
     """
     def __init__(self, device_idx: int, width: int, height: int, init_kwargs):
         super().__init__(**init_kwargs)
@@ -21,8 +21,6 @@ class UltrasoundIngestionProcess(SensorIngestionProcess):
         
     def setup_hardware(self) -> bool:
         logger.info(f"Connecting to Ultrasound Capture Card ID: {self.device_idx}")
-        # Note: Depending on OS, cv2.CAP_DSHOW might be needed for Windows
-        # to ensure the capture card initializes correctly and uncompressed.
         self.cap = cv2.VideoCapture(self.device_idx)
         if not self.cap.isOpened():
             logger.error(f"Failed to open Ultrasound Device {self.device_idx}")

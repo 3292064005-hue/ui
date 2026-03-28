@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from spine_ultrasound_ui.services import ipc_messages_pb2
-from spine_ultrasound_ui.services.ipc_protocol import CommandEnvelope
+from spine_ultrasound_ui.services.ipc_protocol import CommandEnvelope, PROTOCOL_VERSION, ReplyEnvelope
 from spine_ultrasound_ui.services.mock_core_runtime import MockCoreRuntime
 from spine_ultrasound_ui.services.protobuf_transport import (
     create_server_ssl_context,
@@ -52,6 +52,17 @@ def handle_command(conn: socket.socket) -> None:
             req_proto = ipc_messages_pb2.Command()
             req_proto.ParseFromString(payload)
             req = CommandEnvelope.from_protobuf(req_proto)
+            if req.protocol_version != PROTOCOL_VERSION:
+                send_reply(
+                    conn,
+                    ReplyEnvelope(
+                        ok=False,
+                        message="protocol version mismatch",
+                        request_id=req.request_id,
+                        data={},
+                    ).to_protobuf(),
+                )
+                return
             with lock:
                 reply = runtime.handle_command(req.command, req.payload)
                 reply.request_id = req.request_id

@@ -9,6 +9,7 @@ export default function StatusBar() {
   const stateLabel: Record<string, [string, string]> = {
     idle:     ['待机', 'text-gray-400'],
     scanning: ['扫描中', 'text-clinical-emerald'],
+    paused:   ['保持中', 'text-clinical-cyan'],
     halted:   ['已制动', 'text-clinical-error'],
   };
   const [label, color] = stateLabel[scanState] || ['未知', 'text-gray-400'];

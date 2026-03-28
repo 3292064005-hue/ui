@@ -3,11 +3,12 @@ import { motion } from 'framer-motion';
 interface Props {
   latestForce: number;
   maxForce: number;
+  targetForce: number;
 }
 
-export default function ForceGraph({ latestForce, maxForce }: Props) {
+export default function ForceGraph({ latestForce, maxForce, targetForce }: Props) {
   const ratio = Math.min(Math.abs(latestForce) / maxForce, 1.0);
-  const deviation = Math.abs(latestForce - 10.0);
+  const deviation = Math.abs(latestForce - targetForce);
 
   // Multi-zone color: green = on target, amber = drifting, red = danger
   let barColor = 'bg-clinical-emerald';
@@ -55,12 +56,12 @@ export default function ForceGraph({ latestForce, maxForce }: Props) {
         />
 
         {/* 10N Target Notch */}
-        <div className="absolute top-0 bottom-0 w-0.5 bg-white/60 z-10" style={{ left: `${(10.0 / maxForce) * 100}%` }} />
+        <div className="absolute top-0 bottom-0 w-0.5 bg-white/60 z-10" style={{ left: `${(targetForce / maxForce) * 100}%` }} />
       </div>
 
       <div className="flex justify-between text-[9px] text-gray-600 font-mono tracking-widest">
         <span>0N</span>
-        <span>目标 (10N)</span>
+        <span>目标 ({targetForce.toFixed(1)}N)</span>
         <span>{maxForce}N (极限)</span>
       </div>
     </div>

@@ -10,6 +10,7 @@
  */
 
 #include "impedance_scan_controller.hpp"
+#include "robot_core/force_control_config.h"
 #include <iostream>
 #include <memory>
 #include <thread>
@@ -19,6 +20,7 @@ int main() {
     std::cout << "=== 脊柱超声医疗级阻抗扫描控制器示例 ===" << std::endl;
 
     try {
+        const auto limits = robot_core::loadForceControlLimits();
         // 1. 初始化ROKAE机器人控制器
         // auto robot = std::make_shared<rokae::xMateErProRobot>();
         // robot->connect("192.168.1.100"); // 实际IP地址
@@ -34,7 +36,7 @@ int main() {
 
         // 3. 配置阻抗模式参数
         std::error_code ec;
-        double desired_contact_force = 10.0; // 10N接触力
+        double desired_contact_force = limits.desired_contact_force_n;
         scanner.prepare_impedance_mode(desired_contact_force, ec);
 
         if (ec) {
@@ -44,7 +46,7 @@ int main() {
 
         std::cout << "✓ 阻抗模式配置完成" << std::endl;
         std::cout << "  - 期望接触力: " << desired_contact_force << " N" << std::endl;
-        std::cout << "  - 安全限制: Z轴 ≤ 35N, XY轴 ≤ 20N" << std::endl;
+        std::cout << "  - 安全限制: Z轴 ≤ " << limits.max_z_force_n << "N, XY轴 ≤ " << limits.max_xy_force_n << "N" << std::endl;
         std::cout << "  - 控制频率: 1ms实时循环" << std::endl;
 
         // 4. 启动接触扫描

@@ -142,8 +142,8 @@ bool RtMotionService::startCartesianImpedance() {
         return false;
     }
 
-    // Set desired force for ultrasound contact (10N downward pressure)
-    impedance_manager_->setDesiredWrench({0.0, 0.0, -10.0, 0.0, 0.0, 0.0});
+    const auto& force_limits = impedance_manager_->getCircuitBreaker().getLimits();
+    impedance_manager_->setDesiredWrench({0.0, 0.0, -std::abs(force_limits.desired_contact_force_n), 0.0, 0.0, 0.0});
     impedance_manager_->activateImpedance();
 
     /*
@@ -237,7 +237,7 @@ bool RtMotionService::seekContact() {
     if (!impedance_manager_) {
         return false;
     }
-    impedance_manager_->setDesiredContactForce(10.0);
+    impedance_manager_->setDesiredContactForce(impedance_manager_->getCircuitBreaker().getLimits().desired_contact_force_n);
     impedance_manager_->activateImpedance();
     return true; 
 }

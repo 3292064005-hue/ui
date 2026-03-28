@@ -210,20 +210,24 @@ class AppController(QObject):
         self._emit_status()
 
     def pause_scan(self) -> None:
-        self._send_or_warn("pause_scan")
+        self._run_guarded_command(
+            "pause_scan",
+            success_message="扫查已暂停，系统进入保持状态。",
+            fallback_to_safe_retreat=True,
+        )
 
     def resume_scan(self) -> None:
-        self._send_or_warn("resume_scan")
+        self._run_guarded_command("resume_scan", success_message="扫查已恢复。")
 
     def stop_scan(self) -> None:
         self._log("INFO", "停止扫查请求已转换为安全退让。")
         self.safe_retreat()
 
     def safe_retreat(self) -> None:
-        self._send_or_warn("safe_retreat")
+        self._run_guarded_command("safe_retreat", success_message="安全退让已请求。")
 
     def go_home(self) -> None:
-        self._send_or_warn("go_home")
+        self._run_guarded_command("go_home", success_message="回零位请求已发送。")
 
     def run_preprocess(self) -> None:
         self.workflow_artifacts.preprocess = self.postprocess_service.preprocess(self.session_service.current_session_dir)
@@ -272,7 +276,7 @@ class AppController(QObject):
         self._log("INFO", f"文本摘要已导出到 {path}")
 
     def emergency_stop(self) -> None:
-        self._send_or_warn("emergency_stop")
+        self._run_guarded_command("emergency_stop", success_message="急停请求已发送。")
 
     def shutdown(self) -> None:
         self.backend.close()
@@ -321,18 +325,35 @@ class AppController(QObject):
             self._log("WARN", f"{command} 失败：{reply.message}")
         return reply
 
-    def _run_scan_start_step(self, command: str) -> bool:
-        reply = self.backend.send_command(command)
+    def _run_guarded_command(
+        self,
+        command: str,
+        payload: Optional[dict] = None,
+        *,
+        success_message: Optional[str] = None,
+        fallback_to_safe_retreat: bool = False,
+    ) -> bool:
+        reply = self.backend.send_command(command, payload)
         if reply.ok:
+            if success_message:
+                self._log("INFO", success_message)
+            self._emit_status()
             return True
         self._log("ERROR", f"{command} 失败：{reply.message}")
-        retreat = self.backend.send_command("safe_retreat")
-        if retreat.ok:
-            self._log("WARN", f"{command} 失败后已自动请求安全退让。")
-        else:
-            self._log("ERROR", f"{command} 失败后安全退让也失败：{retreat.message}")
+        if fallback_to_safe_retreat:
+            self._request_safe_retreat_after_failure(command)
         self._emit_status()
         return False
+
+    def _run_scan_start_step(self, command: str) -> bool:
+        return self._run_guarded_command(command, fallback_to_safe_retreat=True)
+
+    def _request_safe_retreat_after_failure(self, failed_command: str) -> None:
+        retreat = self.backend.send_command("safe_retreat")
+        if retreat.ok:
+            self._log("WARN", f"{failed_command} 失败后已自动请求安全退让。")
+        else:
+            self._log("ERROR", f"{failed_command} 失败后安全退让也失败：{retreat.message}")
 
     def _build_summary_payload(self) -> dict:
         return {

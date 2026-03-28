@@ -14,6 +14,7 @@ interface TelemetryState {
 
   setConnected: (v: boolean) => void;
   pushTelemetry: (ts: number, force: number, safety: number, joints: number[]) => void;
+  mergeTelemetry: (update: Partial<Pick<TelemetryState, 'timestamp' | 'force' | 'safety' | 'joints'>>) => void;
   setLatency: (ms: number) => void;
   reset: () => void;
 }
@@ -31,9 +32,13 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
 
   setConnected: (v) => set({ connected: v }),
 
-  pushTelemetry: (ts, force, safety, joints) => {
-    const now = Date.now();
+  mergeTelemetry: (update) => {
     const state = get();
+    const ts = update.timestamp ?? state.timestamp;
+    const force = update.force ?? state.force;
+    const safety = update.safety ?? state.safety;
+    const joints = update.joints ?? state.joints;
+    const now = Date.now();
     let newFps = state.fps;
     let newCount = state._frameCount + 1;
     let lastTime = state._lastFpsTime;
@@ -54,6 +59,10 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
       _frameCount: newCount,
       _lastFpsTime: lastTime,
     });
+  },
+
+  pushTelemetry: (ts, force, safety, joints) => {
+    get().mergeTelemetry({ timestamp: ts, force, safety, joints });
   },
 
   setLatency: (ms) => set({ latencyMs: ms }),

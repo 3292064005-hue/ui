@@ -24,7 +24,6 @@ class ZeroCopyIpcClient:
         self.socket.connect(self.address)
         self.is_running = True
         self._thread = threading.Thread(target=self._recv_loop, daemon=True)
-        # By setting priority class (if in windows) we prevent UI stalls
         self._thread.start()
 
     def _recv_loop(self):

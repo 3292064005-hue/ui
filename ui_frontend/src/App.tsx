@@ -1,4 +1,5 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { fetchProtocolSchema, postCommand, type ProtocolSchema } from './api/client';
 import { useTelemetryStore } from './store/telemetryStore';
 import { useSessionStore } from './store/sessionStore';
 import { useUIStore } from './store/uiStore';
@@ -21,37 +22,94 @@ import { Activity, ShieldAlert, WifiOff, Loader2, Play, Square, Zap } from 'luci
 export default function App() {
   // Connect the centralized WebSocket
   useTelemetrySocket();
+  const [commandPending, setCommandPending] = useState(false);
+  const [protocolSchema, setProtocolSchema] = useState<ProtocolSchema | null>(null);
 
   // Store hooks
-  const { force, safety, connected } = useTelemetryStore();
-  const { scanState, startScan, stopScan, triggerHalt, resetHalt, addLog } = useSessionStore();
+  const { force, connected } = useTelemetryStore();
+  const { scanState, triggerHalt, resetHalt, addLog } = useSessionStore();
   const { showCamera, showUltrasound, showForceGraph, show3DView, showJoints, showLog, addToast } = useUIStore();
 
   const isHalted = scanState === 'halted';
   const isScanning = scanState === 'scanning';
+  const isPaused = scanState === 'paused';
+  const desiredContactForce = protocolSchema?.force_control.desired_contact_force_n ?? 10.0;
+  const maxZForce = protocolSchema?.force_control.max_z_force_n ?? 35.0;
 
   // Handle scan button
-  const handleScanToggle = () => {
-    if (isHalted) return;
-    if (isScanning) {
-      stopScan();
-      addToast('扫描已停止', 'info');
-    } else {
-      startScan();
-      addToast('扫描已启动', 'success');
+  const handleScanToggle = async () => {
+    if (isHalted || commandPending) {
+      return;
+    }
+    const command = isScanning ? 'safe_retreat' : isPaused ? 'resume_scan' : 'start_scan';
+    const successMessage = isScanning ? '已请求安全退让' : isPaused ? '已请求恢复扫描' : '已请求开始扫描';
+    try {
+      setCommandPending(true);
+      const reply = await postCommand(command);
+      if (!reply.ok) {
+        addLog('error', `${command} 失败: ${reply.message}`);
+        addToast(reply.message || `${command} 失败`, 'error');
+        return;
+      }
+      addLog('success', reply.message || successMessage);
+      addToast(successMessage, isScanning ? 'info' : 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `${command} failed`;
+      addLog('error', `${command} 失败: ${message}`);
+      addToast(message, 'error');
+    } finally {
+      setCommandPending(false);
     }
   };
 
   // Handle E-STOP
-  const handleEStop = () => {
-    triggerHalt();
-    addToast('⚠ 紧急制动已激活', 'error');
+  const handleEStop = async () => {
+    if (commandPending) {
+      return;
+    }
+    try {
+      setCommandPending(true);
+      const reply = await postCommand('emergency_stop');
+      if (!reply.ok) {
+        addLog('error', `emergency_stop 失败: ${reply.message}`);
+        addToast(reply.message || '急停请求失败', 'error');
+        return;
+      }
+      triggerHalt();
+      addLog('error', reply.message || '急停请求已发送');
+      addToast('⚠ 紧急制动已激活', 'error');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '急停请求失败';
+      addLog('error', `emergency_stop 失败: ${message}`);
+      addToast(message, 'error');
+    } finally {
+      setCommandPending(false);
+    }
   };
 
   // Handle RESET
-  const handleReset = () => {
-    resetHalt();
-    addToast('制动已解除，系统恢复', 'warn');
+  const handleReset = async () => {
+    if (commandPending) {
+      return;
+    }
+    try {
+      setCommandPending(true);
+      const reply = await postCommand('clear_fault');
+      if (!reply.ok) {
+        addLog('error', `clear_fault 失败: ${reply.message}`);
+        addToast(reply.message || '故障清除失败', 'error');
+        return;
+      }
+      resetHalt();
+      addLog('warn', reply.message || '故障已清除');
+      addToast('制动已解除，系统恢复', 'warn');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '故障清除失败';
+      addLog('error', `clear_fault 失败: ${message}`);
+      addToast(message, 'error');
+    } finally {
+      setCommandPending(false);
+    }
   };
 
   // Keyboard shortcuts
@@ -71,12 +129,29 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   });
 
+  useEffect(() => {
+    let cancelled = false;
+    fetchProtocolSchema()
+      .then((schema) => {
+        if (!cancelled) {
+          setProtocolSchema(schema);
+        }
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : 'schema unavailable';
+        addLog('warn', `schema 加载失败: ${message}`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [addLog]);
+
   return (
     <div className="relative w-screen h-screen">
 
       {/* === Layer 0: 3D Background === */}
       <div className={`absolute inset-0 z-0 transition-opacity duration-500 ${show3DView && !isHalted ? 'opacity-100' : 'opacity-20'}`}>
-        <ThreeDView />
+        <ThreeDView targetForce={desiredContactForce} maxForce={maxZForce} />
       </div>
 
       {/* === Layer 1: HUD Overlays === */}
@@ -140,7 +215,7 @@ export default function App() {
             {showForceGraph && (
               <div className="w-80 glass-panel p-4 shadow-[0_0_20px_rgba(0,0,0,0.5)] animate-fade-in-up">
                 <h3 className="text-[10px] text-gray-500 font-bold tracking-widest mb-3">Z 轴力控</h3>
-                <ForceGraph latestForce={force} maxForce={15.0} />
+                <ForceGraph latestForce={force} maxForce={maxZForce} targetForce={desiredContactForce} />
               </div>
             )}
 
@@ -150,7 +225,15 @@ export default function App() {
                 <h3 className="text-[10px] text-clinical-cyan font-bold tracking-widest px-1 mb-1">力传感器示波器</h3>
                 <RollingChart
                   latestValue={force}
-                  color={Math.abs(force - 10.0) < 1.0 ? '#00FA9A' : Math.abs(force - 10.0) < 3.0 ? '#FFB800' : '#FF2A55'}
+                  color={
+                    Math.abs(force - desiredContactForce) < 1.0
+                      ? '#00FA9A'
+                      : Math.abs(force - desiredContactForce) < 3.0
+                        ? '#FFB800'
+                        : '#FF2A55'
+                  }
+                  maxVal={maxZForce}
+                  targetValue={desiredContactForce}
                   width={300}
                   height={100}
                 />
@@ -165,23 +248,28 @@ export default function App() {
           <div className="glass-panel p-2 flex space-x-2 pointer-events-auto shadow-[0_0_20px_rgba(0,0,0,0.5)]">
             <button
               onClick={handleScanToggle}
-              disabled={isHalted}
+              disabled={isHalted || commandPending}
               className={`px-6 py-3 border rounded-xl font-bold text-sm tracking-wider transition-all hover:scale-105 active:scale-95 flex items-center justify-center min-w-[150px] disabled:opacity-30 disabled:cursor-not-allowed
                 ${isScanning
                   ? 'bg-clinical-emerald/15 border-clinical-emerald/40 text-clinical-emerald hover:bg-clinical-emerald/30'
                   : 'bg-clinical-cyan/15 border-clinical-cyan/40 text-clinical-cyan hover:bg-clinical-cyan/30'}`}
             >
-              {isScanning ? (
-                <><Square className="w-4 h-4 mr-2" /> 停止扫描</>
+              {commandPending ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> 处理中</>
+              ) : isScanning ? (
+                <><Square className="w-4 h-4 mr-2" /> 安全退让</>
+              ) : isPaused ? (
+                <><Play className="w-4 h-4 mr-2" /> 恢复扫描</>
               ) : (
                 <><Play className="w-4 h-4 mr-2" /> 开始扫描</>
               )}
             </button>
             <button
               onClick={handleEStop}
+              disabled={commandPending}
               className="px-6 py-3 bg-clinical-error/15 hover:bg-clinical-error/30 border border-clinical-error/40
                          rounded-xl font-bold text-sm tracking-wider transition-all hover:scale-105 active:scale-95
-                         min-w-[130px] text-clinical-error flex items-center justify-center"
+                         min-w-[130px] text-clinical-error flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Zap className="w-4 h-4 mr-2" /> 紧急制动
             </button>

@@ -5,16 +5,16 @@ import * as THREE from 'three';
 import { useTelemetryStore } from '../store/telemetryStore';
 
 /** Animated probe mesh — bobs based on real force telemetry */
-function UltrasoundProbe() {
+function UltrasoundProbe({ targetForce, maxForce }: { targetForce: number; maxForce: number }) {
   const meshRef = useRef<THREE.Mesh>(null);
 
   useFrame(() => {
     if (!meshRef.current) return;
     const force = useTelemetryStore.getState().force;
     // Subtle Z-axis displacement proportional to force (visual feedback)
-    meshRef.current.position.y = -0.05 + (force / 15.0) * 0.08;
+    meshRef.current.position.y = -0.05 + (force / maxForce) * 0.08;
     // Slight tilt based on force deviation
-    meshRef.current.rotation.x = (force - 10.0) * 0.02;
+    meshRef.current.rotation.x = (force - targetForce) * 0.02;
   });
 
   return (
@@ -49,7 +49,13 @@ function PatientOutline() {
   );
 }
 
-export default function ThreeDView() {
+export default function ThreeDView({
+  targetForce = 10.0,
+  maxForce = 35.0,
+}: {
+  targetForce?: number;
+  maxForce?: number;
+}) {
   return (
     <div className="w-full h-full bg-clinical-bg">
       <Canvas shadows camera={{ position: [0.6, 0.5, 0.9], fov: 42 }}>
@@ -74,7 +80,7 @@ export default function ThreeDView() {
 
         {/* Patient + Probe */}
         <PatientOutline />
-        <UltrasoundProbe />
+        <UltrasoundProbe targetForce={targetForce} maxForce={maxForce} />
 
         {/* Coordinate Axes */}
         <axesHelper args={[0.3]} />

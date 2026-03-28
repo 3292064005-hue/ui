@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from spine_ultrasound_ui.core.session_recorders import JsonlRecorder
 from spine_ultrasound_ui.models import RuntimeConfig, SystemState
+from spine_ultrasound_ui.services.force_control_config import load_force_control_config
 from spine_ultrasound_ui.services.ipc_protocol import ReplyEnvelope, TelemetryEnvelope
 from spine_ultrasound_ui.utils import ensure_dir, now_ns
 
@@ -14,6 +15,7 @@ from spine_ultrasound_ui.utils import ensure_dir, now_ns
 class MockCoreRuntime:
     def __init__(self) -> None:
         self.config = RuntimeConfig()
+        self.force_control = load_force_control_config()
         self.execution_state = SystemState.DISCONNECTED
         self.controller_online = False
         self.powered = False
@@ -451,7 +453,15 @@ class MockCoreRuntime:
             "load_unvalidated",
             "rt_jitter_high",
         } & set(interlocks)
-        return {"safe_to_arm": safe_to_arm, "safe_to_scan": safe_to_scan, "active_interlocks": interlocks}
+        return {
+            "safe_to_arm": safe_to_arm,
+            "safe_to_scan": safe_to_scan,
+            "active_interlocks": interlocks,
+            "max_z_force_n": self.force_control["max_z_force_n"],
+            "warning_z_force_n": self.force_control["warning_z_force_n"],
+            "max_xy_force_n": self.force_control["max_xy_force_n"],
+            "desired_contact_force_n": self.force_control["desired_contact_force_n"],
+        }
 
     def _refresh_device_health(self, ts_ns: int) -> None:
         self.pressure_fresh = False

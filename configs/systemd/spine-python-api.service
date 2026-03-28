@@ -1,12 +1,11 @@
 [Unit]
-Description=Spine Ultrasound Platform: Python API & UI Headless Backend
+Description=Spine Ultrasound Platform Ubuntu 22.04 headless backend
 After=spine-cpp-core.service
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/spine_ultrasound/spine_ultrasound_ui
-# Start the Uvicorn FastAPI Server and WebRTC GStreamer background pipelines
-ExecStart=/opt/spine_ultrasound/.venv/bin/uvicorn api_server:app --host 0.0.0.0 --port 8000
+WorkingDirectory=/opt/spine_ultrasound
+ExecStart=/opt/spine_ultrasound/.venv/bin/uvicorn spine_ultrasound_ui.api_server:app --host 0.0.0.0 --port 8000
 
 # Do NOT pin to isolated CPUs 0,1. Default system scheduler handles Python on remaining cores (2-15)
 CPUSchedulingPolicy=other

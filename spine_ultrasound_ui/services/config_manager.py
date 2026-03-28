@@ -3,6 +3,7 @@ import os
 from typing import Any, Dict, Optional
 from PySide6.QtCore import QObject, Signal
 from .event_bus import ebus
+from .force_control_config import load_force_control_config
 
 class ConfigManager(QObject):
     """
@@ -57,14 +58,15 @@ class ConfigManager(QObject):
 
     def _get_default_config(self) -> Dict[str, Any]:
         """获取默认配置"""
+        force_control = load_force_control_config()
         return {
             # 阻抗控制参数
             'impedance': {
                 'stiffness': [2000.0, 2000.0, 50.0, 200.0, 200.0, 200.0],  # X,Y,Z,RX,RY,RZ
                 'damping': [50.0, 50.0, 10.0, 20.0, 20.0, 20.0],
-                'desired_force': 10.0,  # N
-                'max_z_force': 35.0,   # N
-                'max_xy_force': 20.0   # N
+                'desired_force': force_control['desired_contact_force_n'],  # N
+                'max_z_force': force_control['max_z_force_n'],   # N
+                'max_xy_force': force_control['max_xy_force_n']   # N
             },
 
             # 滤波参数
@@ -98,7 +100,7 @@ class ConfigManager(QObject):
             # 安全参数
             'safety': {
                 'emergency_stop_timeout': 100,  # ms
-                'force_warning_threshold': 25.0,  # N
+                'force_warning_threshold': force_control['warning_z_force_n'],  # N
                 'heartbeat_timeout': 500  # ms
             }
         }

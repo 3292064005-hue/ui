@@ -9,6 +9,8 @@
 #include <chrono>
 #include <thread>
 
+#include "robot_core/force_control_config.h"
+
 // Assuming ROKAE SDK headers are available when compiling against third_party.
 // #include "rokae/robot.h"
 // #include "rokae/exceptions.h"
@@ -55,9 +57,7 @@ class ImpedanceScanController {
 private:
     std::shared_ptr<RtMotionControlCobot> rt_con_;
     std::atomic<bool> is_scanning_{false};
-
-    // 医疗级安全红线 (绝对禁止修改为过大数值)
-    const double MAX_Z_FORCE_N = 35.0; // 探头向下压的最大容忍力 35N
+    const double max_z_force_n_ = robot_core::loadForceControlLimits().max_z_force_n;
 
 public:
     ImpedanceScanController(std::shared_ptr<RtMotionControlCobot> rt_con)
@@ -140,7 +140,7 @@ public:
             // 简化的力映射逻辑 (实际中可用 SDK 接口 getEndTorque 或雅可比矩阵解算)
             double current_z_force = calculate_z_force(ext_tau);
 
-            if (std::abs(current_z_force) > MAX_Z_FORCE_N) {
+            if (std::abs(current_z_force) > max_z_force_n_) {
                 is_scanning_ = false;
                 // 瞬间切断：通过返回 setFinished() 优雅但极速地终止控制流
                 target_cmd.setFinished();

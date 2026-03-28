@@ -5,6 +5,7 @@ interface Props {
   color?: string;
   maxPoints?: number;
   maxVal?: number;
+  targetValue?: number;
   width?: number;
   height?: number;
 }
@@ -18,6 +19,7 @@ export default function RollingChart({
   color = '#00E5FF',
   maxPoints = 150,
   maxVal = 15.0,
+  targetValue = 10.0,
   width = 320,
   height = 110,
 }: Props) {
@@ -62,7 +64,7 @@ export default function RollingChart({
     });
   }, [latestValue, maxPoints, maxVal, width, height]);
 
-  const targetY = height - (10.0 / maxVal) * height;
+  const targetY = height - (targetValue / maxVal) * height;
 
   const handleMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();

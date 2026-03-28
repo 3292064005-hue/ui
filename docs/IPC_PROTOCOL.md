@@ -1,11 +1,14 @@
 # IPC Protocol
 
+正式支持环境固定为 Ubuntu 22.04。
+
 本工程采用本机双通道 IPC，正式协议统一为 TLS 1.3 + length-prefixed Protobuf：
 
 - Command Channel: request/reply, default `127.0.0.1:5656`
 - Telemetry Channel: fanout stream, default `127.0.0.1:5657`
 - All envelopes include `protocol_version = 1`
 - Python `RobotCoreClientBackend`、C++ `CommandServer`、`scripts/mock_robot_core_server.py` 必须共用同一协议定义
+- Headless/Web 公开面通过 `GET /api/v1/schema` 暴露同一份命令与遥测合同
 
 ## 1. Protobuf Messages
 
@@ -64,6 +67,8 @@
 - `scan_plan_hash`
 
 `load_scan_plan` payload 包含完整 `scan_plan` 对象。
+
+`GET /api/v1/schema` 会把命令必填字段、状态前置条件、telemetry topic 核心字段和 `configs/force_control.json` 中的正式力控阈值一起公开出来，供 `ui_frontend`、文档和回归测试复用。
 
 ## 3. Topics
 

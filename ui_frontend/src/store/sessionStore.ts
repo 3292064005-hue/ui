@@ -8,7 +8,8 @@ export interface LogEntry {
 
 interface SessionState {
   // Scan state
-  scanState: 'idle' | 'scanning' | 'halted';
+  scanState: 'idle' | 'scanning' | 'paused' | 'halted';
+  executionState: string;
   sessionId: string | null;
   startTime: number | null;
   frameCount: number;
@@ -27,6 +28,7 @@ interface SessionState {
   addLog: (level: LogEntry['level'], msg: string) => void;
   pushForce: (v: number) => void;
   incrementFrame: () => void;
+  syncCoreState: (executionState: string, sessionId?: string | null) => void;
   exportCSV: () => void;
 }
 
@@ -43,6 +45,7 @@ const timeStr = () => {
 
 export const useSessionStore = create<SessionState>((set, get) => ({
   scanState: 'idle',
+  executionState: 'BOOT',
   sessionId: null,
   startTime: null,
   frameCount: 0,
@@ -51,23 +54,23 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   startScan: () => {
     const sid = genSessionId();
-    set({ scanState: 'scanning', sessionId: sid, startTime: Date.now(), frameCount: 0, forceHistory: [] });
+    set({ scanState: 'scanning', executionState: 'SCANNING', sessionId: sid, startTime: Date.now(), frameCount: 0, forceHistory: [] });
     get().addLog('success', `扫描启动 [${sid}]`);
   },
 
   stopScan: () => {
     const sid = get().sessionId;
-    set({ scanState: 'idle', startTime: null });
+    set({ scanState: 'idle', executionState: 'RETREATING', startTime: null });
     get().addLog('info', `扫描停止 [${sid}]，共 ${get().frameCount} 帧`);
   },
 
   triggerHalt: () => {
-    set({ scanState: 'halted' });
+    set({ scanState: 'halted', executionState: 'ESTOP' });
     get().addLog('error', '⚠ 紧急制动已激活 — 硬件锁定');
   },
 
   resetHalt: () => {
-    set({ scanState: 'idle' });
+    set({ scanState: 'idle', executionState: 'AUTO_READY' });
     get().addLog('warn', '制动已解除 — 系统恢复待机');
   },
 
@@ -85,6 +88,25 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   incrementFrame: () => set(s => ({ frameCount: s.frameCount + 1 })),
+
+  syncCoreState: (executionState, sessionId) => set((state) => {
+    let scanState = state.scanState;
+    if (executionState === 'SCANNING') {
+      scanState = 'scanning';
+    } else if (executionState === 'PAUSED_HOLD') {
+      scanState = 'paused';
+    } else if (executionState === 'ESTOP') {
+      scanState = 'halted';
+    } else {
+      scanState = 'idle';
+    }
+    return {
+      executionState,
+      scanState,
+      sessionId: sessionId || state.sessionId,
+      startTime: scanState === 'scanning' ? state.startTime || Date.now() : state.startTime,
+    };
+  }),
 
   exportCSV: () => {
     const rows = get().forceHistory;

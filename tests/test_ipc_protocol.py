@@ -1,5 +1,16 @@
 from spine_ultrasound_ui.services import ipc_messages_pb2
-from spine_ultrasound_ui.services.ipc_protocol import CommandEnvelope, PROTOCOL_VERSION, ReplyEnvelope, TelemetryEnvelope
+from spine_ultrasound_ui.services.core_transport import parse_reply_payload, parse_telemetry_payload
+from spine_ultrasound_ui.services.ipc_protocol import (
+    CommandEnvelope,
+    COMMAND_SPECS,
+    PROTOCOL_VERSION,
+    ProtocolVersionError,
+    ReplyEnvelope,
+    TelemetryEnvelope,
+    ensure_protocol_version,
+    protocol_schema,
+    validate_command_payload,
+)
 
 
 def test_command_envelope_json_roundtrip():
@@ -51,3 +62,76 @@ def test_telemetry_envelope_protobuf_roundtrip():
     assert tel.topic == "robot_state"
     assert tel.data["powered"] is True
     assert tel.ts_ns == 42
+
+
+def test_protocol_version_guard_accepts_canonical_version():
+    ensure_protocol_version(PROTOCOL_VERSION, "Reply")
+
+
+def test_protocol_version_guard_rejects_mismatch():
+    try:
+        ensure_protocol_version(PROTOCOL_VERSION + 1, "Reply")
+    except ProtocolVersionError as exc:
+        assert "expected 1" in str(exc)
+    else:
+        raise AssertionError("protocol version mismatch should be rejected")
+
+
+def test_parse_reply_payload_rejects_mismatched_protocol_version():
+    proto = ipc_messages_pb2.Reply(
+        protocol_version=PROTOCOL_VERSION + 1,
+        ok=False,
+        message="bad version",
+        request_id="req-1",
+        data_json="{}",
+    )
+    try:
+        parse_reply_payload(proto.SerializeToString())
+    except ProtocolVersionError as exc:
+        assert "Reply protocol_version mismatch" in str(exc)
+    else:
+        raise AssertionError("reply payload with wrong protocol version should be rejected")
+
+
+def test_parse_telemetry_payload_rejects_mismatched_protocol_version():
+    proto = ipc_messages_pb2.TelemetryEnvelope(
+        protocol_version=PROTOCOL_VERSION + 1,
+        topic="core_state",
+        ts_ns=1,
+        data_json='{"execution_state": "BOOT"}',
+    )
+    try:
+        parse_telemetry_payload(proto.SerializeToString())
+    except ProtocolVersionError as exc:
+        assert "TelemetryEnvelope protocol_version mismatch" in str(exc)
+    else:
+        raise AssertionError("telemetry payload with wrong protocol version should be rejected")
+
+
+def test_protocol_schema_exposes_canonical_contract():
+    schema = protocol_schema()
+    assert schema["protocol_version"] == PROTOCOL_VERSION
+    assert schema["commands"]["lock_session"]["required_payload_fields"] == COMMAND_SPECS["lock_session"]["required_payload_fields"]
+    assert "desired_contact_force_n" in schema["force_control"]
+    assert "core_state" in schema["telemetry_topics"]
+
+
+def test_validate_command_payload_rejects_missing_required_fields():
+    try:
+        validate_command_payload("lock_session", {"session_id": "S1"})
+    except ValueError as exc:
+        assert "missing required fields" in str(exc)
+    else:
+        raise AssertionError("lock_session without mandatory fields should be rejected")
+
+
+def test_validate_command_payload_accepts_scan_plan_contract():
+    validate_command_payload(
+        "load_scan_plan",
+        {
+            "scan_plan": {
+                "plan_id": "plan-1",
+                "segments": [{"segment_id": 1, "points": [{"x": 0.0, "y": 0.0, "z": 0.0}]}],
+            }
+        },
+    )
