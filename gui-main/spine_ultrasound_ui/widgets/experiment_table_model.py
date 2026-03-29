@@ -24,7 +24,7 @@ class ExperimentTableModel(QAbstractTableModel):
         return len(self.headers)
 
     def data(self, index, role=Qt.DisplayRole):
-        if not index.isValid() or role != Qt.DisplayRole:
+        if not index.isValid():
             return None
         rec = self._data[index.row()]
         columns = [
@@ -35,7 +35,11 @@ class ExperimentTableModel(QAbstractTableModel):
             f"{rec.pressure_target:.2f} N",
             rec.save_dir,
         ]
-        return columns[index.column()]
+        if role == Qt.DisplayRole:
+            return columns[index.column()]
+        if role == Qt.TextAlignmentRole:
+            return Qt.AlignCenter if index.column() in {2, 3, 4} else Qt.AlignLeft | Qt.AlignVCenter
+        return None
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         if role != Qt.DisplayRole:

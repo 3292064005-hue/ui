@@ -9,6 +9,8 @@ class ConfigForm(QGroupBox):
     def __init__(self, config: RuntimeConfig):
         super().__init__("参数配置")
         layout = QFormLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(14, 18, 14, 14)
         self.pressure_target = QLineEdit(str(config.pressure_target))
         self.pressure_upper = QLineEdit(str(config.pressure_upper))
         self.pressure_lower = QLineEdit(str(config.pressure_lower))
@@ -42,6 +44,7 @@ class ConfigForm(QGroupBox):
         layout.addRow("遥测频率 (Hz)", self.telemetry_rate_hz)
         layout.addRow("ROI 模式", self.roi_mode)
         self.apply_btn = QPushButton("应用参数")
+        self.apply_btn.setProperty("kind", "primary")
         self.apply_btn.clicked.connect(self._emit_config)
         layout.addRow(self.apply_btn)
 

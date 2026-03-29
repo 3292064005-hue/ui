@@ -1,5 +1,6 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QGridLayout, QGroupBox, QLabel, QProgressBar, QSplitter, QVBoxLayout, QWidget
+
 from spine_ultrasound_ui.widgets import ImagePane
 
 
@@ -7,24 +8,49 @@ class ScanPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        imgs = QSplitter(Qt.Vertical)
-        self.camera_pane = ImagePane("摄像头实时画面")
-        self.ultrasound_pane = ImagePane("超声实时画面")
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(12)
+
+        title = QLabel("自动扫查")
+        title.setObjectName("PageTitle")
+        subtitle = QLabel("实时展示摄像头、超声画面以及路径执行、接触和位姿指标。")
+        subtitle.setObjectName("PageSubtitle")
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+
+        imgs = QSplitter(Qt.Horizontal)
+        imgs.setChildrenCollapsible(False)
+        self.camera_pane = ImagePane("摄像头实时画面", "显示背部表面、标记点与定位引导信息")
+        self.ultrasound_pane = ImagePane("超声实时画面", "显示当前超声 B 模图像与接触质量")
         imgs.addWidget(self.camera_pane)
         imgs.addWidget(self.ultrasound_pane)
-        imgs.setSizes([360, 360])
+        imgs.setSizes([540, 540])
         layout.addWidget(imgs)
+
         stat_box = QGroupBox("扫查实时指标")
         stat_layout = QGridLayout(stat_box)
+        stat_layout.setSpacing(10)
         self.lbl_segment = QLabel("0")
+        self.lbl_segment.setObjectName("MetricValue")
         self.lbl_path_idx = QLabel("0")
+        self.lbl_path_idx.setObjectName("MetricValue")
         self.lbl_frame_id = QLabel("0")
-        self.progress = QProgressBar(); self.progress.setRange(0, 100)
+        self.lbl_frame_id.setObjectName("MetricValue")
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
+        self.progress.setFormat("%p%")
         self.lbl_pressure_current = QLabel("0.00 N")
+        self.lbl_pressure_current.setObjectName("MetricValue")
         self.lbl_pressure_target = QLabel("1.50 N")
+        self.lbl_pressure_target.setObjectName("MetricValue")
         self.lbl_contact_mode = QLabel("NO_CONTACT")
+        self.lbl_contact_mode.setObjectName("MetricChip")
         self.lbl_contact_conf = QLabel("0.00")
+        self.lbl_contact_conf.setObjectName("MetricValue")
         self.lbl_pose = QLabel("-")
+        self.lbl_pose.setObjectName("FieldValue")
+        self.lbl_pose.setWordWrap(True)
+
         stat_layout.addWidget(QLabel("段号"), 0, 0)
         stat_layout.addWidget(self.lbl_segment, 0, 1)
         stat_layout.addWidget(QLabel("路径点"), 0, 2)
