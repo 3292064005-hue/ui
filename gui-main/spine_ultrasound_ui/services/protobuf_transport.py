@@ -7,8 +7,9 @@ import struct
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_TLS_CERT = REPO_ROOT / "configs" / "tls" / "robot_core_server.crt"
-DEFAULT_TLS_KEY = REPO_ROOT / "configs" / "tls" / "robot_core_server.key"
+DEFAULT_TLS_CERT = REPO_ROOT / "configs" / "tls" / "runtime" / "robot_core_server.crt"
+FALLBACK_TLS_CERT = REPO_ROOT / "configs" / "tls" / "robot_core_server.crt"
+DEFAULT_TLS_KEY = REPO_ROOT / "configs" / "tls" / "runtime" / "robot_core_server.key"
 DEFAULT_TLS_SERVER_NAME = os.getenv("ROBOT_CORE_TLS_SERVER_NAME", "localhost")
 
 
@@ -16,7 +17,7 @@ def resolve_tls_cert_path() -> Path:
     env_value = os.getenv("ROBOT_CORE_TLS_CERT")
     if env_value:
         return Path(env_value).expanduser().resolve()
-    return DEFAULT_TLS_CERT
+    return DEFAULT_TLS_CERT if DEFAULT_TLS_CERT.exists() else FALLBACK_TLS_CERT
 
 
 def resolve_tls_key_path() -> Path:

@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Dict, Any, Optional
 from PySide6.QtCore import QObject, Signal
-from .event_bus import get_event_bus
+from .qt_signal_bus import get_qt_signal_bus as get_event_bus
 
 class SystemState(Enum):
     """系统全局状态枚举"""

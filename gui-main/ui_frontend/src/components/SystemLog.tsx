@@ -1,5 +1,5 @@
 import { useRef, useEffect } from 'react';
-import { useSessionStore } from '../store/sessionStore';
+import { useSessionStore } from '../state/sessionStore';
 
 const levelColors = {
   info: 'text-clinical-cyan',

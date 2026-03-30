@@ -19,6 +19,11 @@ class ReleaseEvidencePackService:
         'recovery_decision_timeline': 'derived/recovery/recovery_decision_timeline.json',
         'session_report': 'export/session_report.json',
         'qa_pack': 'export/qa_pack.json',
+        'control_plane_snapshot': 'derived/session/control_plane_snapshot.json',
+        'control_authority_snapshot': 'derived/session/control_authority_snapshot.json',
+        'bridge_observability_report': 'derived/events/bridge_observability_report.json',
+        'artifact_registry_snapshot': 'derived/session/artifact_registry_snapshot.json',
+        'session_evidence_seal': 'meta/session_evidence_seal.json',
     }
 
     def build(self, session_dir: Path) -> dict[str, Any]:
@@ -28,6 +33,7 @@ class ReleaseEvidencePackService:
         contract = self._read_json(session_dir / 'derived' / 'session' / 'contract_consistency.json')
         readiness = self._read_json(session_dir / 'meta' / 'device_readiness.json')
         resume_decision = self._read_json(session_dir / 'meta' / 'resume_decision.json')
+        evidence_seal = self._read_json(session_dir / 'meta' / 'session_evidence_seal.json')
         artifact_registry = dict(manifest.get('artifact_registry', {}))
         evidence_index = []
         gaps = []
@@ -51,6 +57,8 @@ class ReleaseEvidencePackService:
         advisory_gaps: list[str] = []
         if not bool(readiness.get('ready_to_lock', False)):
             advisory_gaps.append('device_not_ready_snapshot')
+        if not bool(evidence_seal.get('seal_digest', '')):
+            gaps.append('session_evidence_seal_missing')
         if not bool(resume_decision.get('resume_allowed', True)):
             advisory_gaps.append('resume_blocked')
         release_candidate = bool(contract.get('summary', {}).get('consistent', False))
@@ -75,6 +83,7 @@ class ReleaseEvidencePackService:
             'diagnostics_summary': diagnostics.get('summary', {}),
             'integrity_summary': integrity.get('summary', {}),
             'contract_summary': contract.get('summary', {}),
+            'evidence_seal': {'seal_digest': evidence_seal.get('seal_digest', ''), 'artifact_count': int(evidence_seal.get('artifact_count', 0) or 0)},
             'evidence_index': evidence_index,
             'open_gaps': gaps,
             'advisory_gaps': advisory_gaps,

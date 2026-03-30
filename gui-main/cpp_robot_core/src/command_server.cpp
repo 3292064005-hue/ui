@@ -64,16 +64,19 @@ std::filesystem::path resolveTlsFile(
 
 SSL_CTX* createTLSContext() {
   const auto cert_path =
-      resolveTlsFile("ROBOT_CORE_TLS_CERT", {"configs/tls/robot_core_server.crt",
+      resolveTlsFile("ROBOT_CORE_TLS_CERT", {"configs/tls/runtime/robot_core_server.crt",
+                                              "configs/tls/robot_core_server.crt",
+                                              "../configs/tls/runtime/robot_core_server.crt",
                                               "../configs/tls/robot_core_server.crt",
+                                              "../../configs/tls/runtime/robot_core_server.crt",
                                               "../../configs/tls/robot_core_server.crt"});
   const auto key_path =
-      resolveTlsFile("ROBOT_CORE_TLS_KEY", {"configs/tls/robot_core_server.key",
-                                             "../configs/tls/robot_core_server.key",
-                                             "../../configs/tls/robot_core_server.key"});
+      resolveTlsFile("ROBOT_CORE_TLS_KEY", {"configs/tls/runtime/robot_core_server.key",
+                                             "../configs/tls/runtime/robot_core_server.key",
+                                             "../../configs/tls/runtime/robot_core_server.key"});
   if (cert_path.empty() || key_path.empty()) {
     std::cerr << "TLS certificate or key not found. Set ROBOT_CORE_TLS_CERT / "
-                 "ROBOT_CORE_TLS_KEY or provide configs/tls/robot_core_server.*"
+                 "ROBOT_CORE_TLS_KEY or run scripts/generate_dev_tls_cert.sh"
               << std::endl;
     return nullptr;
   }

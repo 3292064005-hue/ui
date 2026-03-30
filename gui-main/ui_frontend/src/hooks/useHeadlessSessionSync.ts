@@ -29,8 +29,8 @@ import {
   type HealthEnvelope,
   type ProtocolSchema,
 } from '../api/client';
-import { useSessionStore } from '../store/sessionStore';
-import type { Workspace } from '../store/uiStore';
+import { useSessionStore } from '../state/sessionStore';
+import type { Workspace } from '../state/uiStore';
 
 interface SyncOptions {
   workspace: Workspace;

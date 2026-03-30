@@ -20,7 +20,11 @@ class ReleaseGateDecisionService:
         selected_execution = self._read_json(session_dir / 'derived' / 'planning' / 'selected_execution_rationale.json')
         command_policy_snapshot = self._read_json(session_dir / 'derived' / 'session' / 'command_policy_snapshot.json')
         contract_kernel_diff = self._read_json(session_dir / 'derived' / 'session' / 'contract_kernel_diff.json')
+        evidence_seal = self._read_json(session_dir / 'meta' / 'session_evidence_seal.json')
+        control_plane_snapshot = self._read_json(session_dir / 'derived' / 'session' / 'control_plane_snapshot.json')
         manifest = self._read_json(session_dir / 'meta' / 'manifest.json')
+        deployment_profile = dict(manifest.get('deployment_profile', {}))
+        seal_required = bool(deployment_profile.get('requires_session_evidence_seal', False))
 
         evaluated_artifacts = [
             'meta/manifest.json',
@@ -33,6 +37,8 @@ class ReleaseGateDecisionService:
             'derived/planning/selected_execution_rationale.json',
             'derived/session/command_policy_snapshot.json',
             'derived/session/contract_kernel_diff.json',
+            'meta/session_evidence_seal.json',
+            'derived/session/control_plane_snapshot.json',
         ]
 
         check_results = [
@@ -44,6 +50,8 @@ class ReleaseGateDecisionService:
             self._check('execution_rationale', bool(selected_execution.get('selected_candidate_id') or selected_execution.get('selected_plan_id')), blocking_reason='selected_execution_rationale_missing', remediation='materialize_selected_execution_rationale', evidence=['derived/planning/selected_execution_rationale.json']),
             self._check('command_policy_snapshot', bool(command_policy_snapshot.get('decision_count', 0)) and bool(command_policy_snapshot.get('policy_version')), warning_reason='command_policy_snapshot_missing', remediation='materialize_command_policy_snapshot', evidence=['derived/session/command_policy_snapshot.json']),
             self._check('contract_kernel_diff', bool(contract_kernel_diff.get('summary', {}).get('consistent', False)), blocking_reason='contract_kernel_diff_failed', remediation='repair_contract_kernel_alignment', evidence=['derived/session/contract_kernel_diff.json']),
+            self._check('session_evidence_seal', bool(evidence_seal.get('seal_digest', '')), blocking_reason='session_evidence_seal_missing' if seal_required else '', warning_reason='' if seal_required else 'session_evidence_seal_missing', remediation='materialize_session_evidence_seal', evidence=['meta/session_evidence_seal.json']),
+            self._check('control_plane_snapshot', bool(control_plane_snapshot.get('summary_state')), warning_reason='control_plane_snapshot_missing', remediation='materialize_control_plane_snapshot', evidence=['derived/session/control_plane_snapshot.json']),
         ]
 
         blocking_reasons = [item['blocking_reason'] for item in check_results if item['status'] == 'failed' and item.get('blocking_reason')]
@@ -68,6 +76,8 @@ class ReleaseGateDecisionService:
             'release_candidate': checks.get('release_candidate', False),
             'schema': 'runtime/release_gate_decision_v1.schema.json',
             'contract_kernel_diff': contract_kernel_diff,
+            'control_plane_snapshot': {'summary_state': control_plane_snapshot.get('summary_state', ''), 'release_mode': dict(control_plane_snapshot.get('release_mode', {}))},
+            'evidence_seal': {'seal_digest': evidence_seal.get('seal_digest', ''), 'artifact_count': int(evidence_seal.get('artifact_count', 0) or 0)},
         }
 
     @staticmethod

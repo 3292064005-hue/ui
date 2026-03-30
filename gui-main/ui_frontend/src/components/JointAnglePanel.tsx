@@ -1,4 +1,4 @@
-import { useTelemetryStore } from '../store/telemetryStore';
+import { useTelemetryStore } from '../state/telemetryStore';
 
 const JOINT_LABELS = ['J1 底座', 'J2 肩部', 'J3 肘部', 'J4 腕旋', 'J5 腕弯', 'J6 腕转'];
 const MAX_DEG = 180;

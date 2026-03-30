@@ -45,6 +45,8 @@ private:
   void recordStreamsLocked();
   void applyConfigFromJsonLocked(const std::string& json_line);
   void loadPlanFromJsonLocked(const std::string& json_line);
+  FinalVerdict compileScanPlanVerdictLocked(const std::string& json_line);
+  std::string finalVerdictJson(const FinalVerdict& verdict) const;
   std::string replyJson(const std::string& request_id, bool ok, const std::string& message, const std::string& data_json = "{}") const;
 
   mutable std::mutex mutex_;
@@ -82,6 +84,7 @@ private:
   double feature_confidence_{0.76};
   double quality_score_{0.79};
   ContactTelemetry contact_state_{};
+  FinalVerdict last_final_verdict_{};
   std::vector<DeviceHealth> devices_{};
   std::vector<AlarmEvent> pending_alarms_{};
   RobotStateHub robot_state_hub_{};

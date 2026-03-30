@@ -9,29 +9,33 @@ from PySide6.QtWidgets import QApplication
 
 from spine_ultrasound_ui.core import AppController
 from spine_ultrasound_ui.main_window import MainWindow
-from spine_ultrasound_ui.services import MockBackend, RobotCoreClientBackend
+from spine_ultrasound_ui.services import ApiBridgeBackend, MockBackend, RobotCoreClientBackend
 
 
-def build_backend(mode: str, root_dir: Path):
+def build_backend(mode: str, root_dir: Path, api_base_url: str | None = None):
     if mode == "core":
         host = os.getenv("ROBOT_CORE_HOST", "127.0.0.1")
         command_port = int(os.getenv("ROBOT_CORE_COMMAND_PORT", "5656"))
         telemetry_port = int(os.getenv("ROBOT_CORE_TELEMETRY_PORT", "5657"))
         return RobotCoreClientBackend(root_dir, command_host=host, command_port=command_port, telemetry_host=host, telemetry_port=telemetry_port)
+    if mode == "api":
+        base_url = api_base_url or os.getenv("SPINE_API_BASE_URL", "http://127.0.0.1:8000")
+        return ApiBridgeBackend(root_dir, base_url=base_url)
     return MockBackend(root_dir)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Spine Ultrasound Platform")
-    parser.add_argument("--backend", choices=["mock", "core"], default=os.getenv("SPINE_UI_BACKEND", "mock"))
+    parser.add_argument("--backend", choices=["mock", "core", "api"], default=os.getenv("SPINE_UI_BACKEND", "mock"))
     parser.add_argument("--workspace", default=str(Path.cwd() / "data"))
+    parser.add_argument("--api-base-url", default=os.getenv("SPINE_API_BASE_URL", "http://127.0.0.1:8000"))
     args, _ = parser.parse_known_args()
 
     app = QApplication(sys.argv)
     app.setApplicationName("Spine Ultrasound Platform")
     app.setOrganizationName("OpenAI")
     root_dir = Path(args.workspace)
-    backend = build_backend(args.backend, root_dir)
+    backend = build_backend(args.backend, root_dir, api_base_url=args.api_base_url)
     controller = AppController(root_dir, backend)
     app.aboutToQuit.connect(controller.shutdown)
     window = MainWindow(controller)

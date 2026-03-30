@@ -56,6 +56,13 @@ class XMateProfile:
     joint_filter_hz: float = 40.0
     cart_filter_hz: float = 30.0
     torque_filter_hz: float = 25.0
+    collision_detection_enabled: bool = True
+    collision_sensitivity: int = 4
+    collision_behavior: str = "pause_hold"
+    collision_fallback_mm: float = 8.0
+    soft_limit_enabled: bool = True
+    joint_soft_limit_margin_deg: float = 5.0
+    singularity_avoidance_enabled: bool = True
     cartesian_impedance: list[float] = field(default_factory=lambda: [2200.0, 2200.0, 1400.0, 45.0, 45.0, 35.0])
     desired_wrench_n: list[float] = field(default_factory=lambda: [0.0, 0.0, 8.0, 0.0, 0.0, 0.0])
     fc_frame_type: str = "path"
@@ -123,6 +130,15 @@ class XMateProfile:
             "cart_filter_hz": self.cart_filter_hz,
             "torque_filter_hz": self.torque_filter_hz,
         }
+        payload["safety_contract"] = {
+            "collision_detection_enabled": self.collision_detection_enabled,
+            "collision_sensitivity": self.collision_sensitivity,
+            "collision_behavior": self.collision_behavior,
+            "collision_fallback_mm": self.collision_fallback_mm,
+            "soft_limit_enabled": self.soft_limit_enabled,
+            "joint_soft_limit_margin_deg": self.joint_soft_limit_margin_deg,
+            "singularity_avoidance_enabled": self.singularity_avoidance_enabled,
+        }
         payload["clinical_scan_contract"] = {
             "strip_width_mm": self.strip_width_mm,
             "strip_overlap_mm": self.strip_overlap_mm,
@@ -178,6 +194,7 @@ def load_xmate_profile(path: Path | None = None) -> XMateProfile:
     data.update(raw)
     data.pop("sdk_mainline", None)
     data.pop("rt_control_contract", None)
+    data.pop("safety_contract", None)
     data.pop("clinical_scan_contract", None)
     data["dh_parameters"] = dh_parameters or defaults.dh_parameters
     data["tool_name"] = str(raw.get("tool_name", raw.get("tcp_name", defaults.tool_name)))

@@ -10,7 +10,7 @@ class ReplayPage(QWidget):
 
         title = QLabel("实验回放")
         title.setObjectName("PageTitle")
-        subtitle = QLabel("查看时间轴、关键告警点、低质量片段与回放备注。")
+        subtitle = QLabel("查看时间轴、关键告警点、低质量片段、路径回放摘要、拖动示教状态和 RL 运行状态。")
         subtitle.setObjectName("PageSubtitle")
         layout.addWidget(title)
         layout.addWidget(subtitle)
@@ -25,3 +25,11 @@ class ReplayPage(QWidget):
         v.addWidget(self.lbl_current)
         v.addWidget(self.timeline)
         layout.addWidget(box)
+
+        sdk_box = QGroupBox("路径与协作资产")
+        sdk_layout = QVBoxLayout(sdk_box)
+        self.asset_view = QTextEdit()
+        self.asset_view.setReadOnly(True)
+        self.asset_view.setPlaceholderText("路径回放库、拖动示教状态、RL 工程状态将在这里显示。")
+        sdk_layout.addWidget(self.asset_view)
+        layout.addWidget(sdk_box)

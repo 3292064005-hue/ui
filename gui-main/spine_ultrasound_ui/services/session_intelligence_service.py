@@ -16,6 +16,7 @@ from spine_ultrasound_ui.services.incident_classifier import IncidentClassifier
 from spine_ultrasound_ui.services.session_integrity_service import SessionIntegrityService
 from spine_ultrasound_ui.services.resume_execution_service import ResumeExecutionService
 from spine_ultrasound_ui.services.session_resume_service import SessionResumeService
+from spine_ultrasound_ui.services.session_evidence_seal_service import SessionEvidenceSealService
 from spine_ultrasound_ui.utils import now_text
 
 
@@ -33,6 +34,7 @@ class SessionIntelligenceService:
         self.command_policy_snapshot = CommandPolicySnapshotService(self.command_policy)
         self.contract_kernel_diff = ContractKernelDiffService()
         self.resume_execution = ResumeExecutionService()
+        self.evidence_seal = SessionEvidenceSealService()
 
     def build_all(self, session_dir: Path) -> dict[str, Any]:
         manifest = self._read_json(session_dir / "meta" / "manifest.json")
@@ -42,6 +44,8 @@ class SessionIntelligenceService:
         alarms = self._read_json(session_dir / "derived" / "alarms" / "alarm_timeline.json")
         quality = self._read_json(session_dir / "derived" / "quality" / "quality_timeline.json")
         report = self._read_json(session_dir / "export" / "session_report.json")
+        summary = self._read_json(session_dir / "export" / "summary.json")
+        evidence_seal = self._read_json(session_dir / "meta" / "session_evidence_seal.json")
         integrity = self.integrity.build(session_dir)
         session_id = str(manifest.get("session_id", session_dir.name))
 
@@ -98,6 +102,15 @@ class SessionIntelligenceService:
         self._write_json(session_dir / 'derived' / 'events' / 'event_delivery_summary.json', event_delivery_summary)
         release_gate_decision = self.release_gate.build(session_dir)
         self._write_json(session_dir / 'export' / 'release_gate_decision.json', release_gate_decision)
+        control_plane_snapshot = self._build_control_plane_snapshot(session_id, summary, release_gate_decision, contract_consistency, evidence_seal)
+        self._write_json(session_dir / 'derived' / 'session' / 'control_plane_snapshot.json', control_plane_snapshot)
+        control_authority_snapshot = self._build_control_authority_snapshot(session_id, summary, manifest)
+        self._write_json(session_dir / 'derived' / 'session' / 'control_authority_snapshot.json', control_authority_snapshot)
+        bridge_observability_report = self._build_bridge_observability_report(session_id, summary, event_delivery_summary)
+        self._write_json(session_dir / 'derived' / 'events' / 'bridge_observability_report.json', bridge_observability_report)
+        artifact_registry_snapshot = self._build_artifact_registry_snapshot(session_id, manifest)
+        self._write_json(session_dir / 'derived' / 'session' / 'artifact_registry_snapshot.json', artifact_registry_snapshot)
+        evidence_seal_snapshot = evidence_seal or self.evidence_seal.build(session_dir, manifest=manifest)
         return {
             "lineage": lineage,
             "resume_state": resume_state,
@@ -110,6 +123,11 @@ class SessionIntelligenceService:
             "event_delivery_summary": event_delivery_summary,
             "selected_execution_rationale": selected_execution_rationale,
             "release_gate_decision": release_gate_decision,
+            "control_plane_snapshot": control_plane_snapshot,
+            "control_authority_snapshot": control_authority_snapshot,
+            "bridge_observability_report": bridge_observability_report,
+            "artifact_registry_snapshot": artifact_registry_snapshot,
+            "session_evidence_seal": evidence_seal_snapshot,
             "resume_attempts": resume_attempts,
             "resume_attempt_outcomes": resume_attempt_outcomes,
             "command_state_policy": command_state_policy,
@@ -286,6 +304,47 @@ class SessionIntelligenceService:
                 "latest_outcome": attempts[-1].get("outcome", "") if attempts else "",
             },
             "attempts": attempts,
+        }
+
+
+
+    def _build_control_plane_snapshot(self, session_id: str, summary: dict[str, Any], release_gate_decision: dict[str, Any], contract_consistency: dict[str, Any], evidence_seal: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(summary.get('control_plane_snapshot', {}))
+        payload.setdefault('session_id', session_id)
+        payload.setdefault('release_gate', {
+            'release_allowed': bool(release_gate_decision.get('release_allowed', False)),
+            'blocking_reasons': list(release_gate_decision.get('blocking_reasons', [])),
+        })
+        payload.setdefault('contract_summary', dict(contract_consistency.get('summary', {})))
+        payload.setdefault('evidence_seal_state', {
+            'summary_state': 'ready' if bool(evidence_seal) else 'degraded',
+            'summary_label': 'session evidence seal' if bool(evidence_seal) else 'session evidence seal missing',
+            'detail': str(evidence_seal.get('seal_digest', '')) if evidence_seal else 'missing',
+        })
+        return payload
+
+    def _build_control_authority_snapshot(self, session_id: str, summary: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(summary.get('control_authority', {}) or manifest.get('control_authority', {}))
+        payload.setdefault('session_id', session_id)
+        payload.setdefault('owner', dict(payload.get('owner', {})))
+        payload.setdefault('active_lease', dict(payload.get('active_lease', {})))
+        payload.setdefault('owner_provenance', dict(payload.get('owner_provenance', {})))
+        return payload
+
+    def _build_bridge_observability_report(self, session_id: str, summary: dict[str, Any], event_delivery_summary: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(summary.get('bridge_observability', {}))
+        payload.setdefault('session_id', session_id)
+        payload['event_delivery_summary'] = dict(event_delivery_summary.get('summary', {}))
+        payload.setdefault('command_lifecycle', ['issued', 'accepted', 'state transition observed', 'telemetry confirmed', 'stability window passed', 'committed'])
+        return payload
+
+    def _build_artifact_registry_snapshot(self, session_id: str, manifest: dict[str, Any]) -> dict[str, Any]:
+        registry = dict(manifest.get('artifact_registry', {}))
+        return {
+            'generated_at': now_text(),
+            'session_id': session_id,
+            'artifact_count': len(registry),
+            'artifact_registry': registry,
         }
 
     def _build_event_delivery_summary(self, session_id: str, event_log_index: dict[str, Any], resume_attempt_outcomes: dict[str, Any], contract_consistency: dict[str, Any]) -> dict[str, Any]:

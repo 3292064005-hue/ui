@@ -93,6 +93,13 @@ class UiViewState:
     recording: Dict[str, Any]
     permissions: Dict[str, bool]
     workflow: Dict[str, Any]
+    actions: Dict[str, Any] = field(default_factory=dict)
+    readiness: Dict[str, Any] = field(default_factory=dict)
+    sdk_alignment: Dict[str, Any] = field(default_factory=dict)
+    sdk_runtime: Dict[str, Any] = field(default_factory=dict)
+    model_report: Dict[str, Any] = field(default_factory=dict)
+    backend_link: Dict[str, Any] = field(default_factory=dict)
+    bridge_observability: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

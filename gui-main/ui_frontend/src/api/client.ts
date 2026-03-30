@@ -72,6 +72,30 @@ export interface ArtifactDescriptor {
   dependencies?: string[];
 }
 
+
+export interface ControlAuthorityEnvelope {
+  summary_state: string;
+  summary_label: string;
+  detail: string;
+  strict_mode?: boolean;
+  auto_issue_implicit_lease?: boolean;
+  has_owner?: boolean;
+  owner?: Record<string, unknown>;
+  active_lease?: Record<string, unknown>;
+  events?: Array<Record<string, unknown>>;
+}
+
+export interface SessionEvidenceSealEnvelope {
+  session_id: string;
+  generated_at: string;
+  immutable_manifest_digest: string;
+  manifest_digest: string;
+  artifact_registry_digest: string;
+  command_journal_digest?: string;
+  seal_digest: string;
+  artifacts?: Array<Record<string, unknown>>;
+}
+
 export interface DeviceReadinessEnvelope {
   generated_at?: string;
   robot_ready: boolean;
@@ -405,6 +429,9 @@ export async function fetchCurrentProfile(): Promise<XMateProfileEnvelope> { ret
 export async function fetchCurrentPatientRegistration(): Promise<PatientRegistrationEnvelope> { return fetchJson('/api/v1/sessions/current/patient-registration'); }
 export async function fetchCurrentScanProtocol(): Promise<ScanProtocolEnvelope> { return fetchJson('/api/v1/sessions/current/scan-protocol'); }
 export async function fetchCurrentQaPack(): Promise<QaPackEnvelope> { return fetchJson('/api/v1/sessions/current/qa-pack'); }
+export async function fetchControlAuthority(): Promise<ControlAuthorityEnvelope> { return fetchJson('/api/v1/control-authority'); }
+export async function acquireControlLease(payload: Record<string, unknown>): Promise<ControlAuthorityEnvelope> { return fetchJsonPost('/api/v1/control-lease/acquire', payload); }
+export async function releaseControlLease(payload: Record<string, unknown>): Promise<ControlAuthorityEnvelope> { return fetchJsonPost('/api/v1/control-lease/release', payload); }
 export async function fetchCurrentCommandTrace(): Promise<CommandTraceEnvelope> { return fetchJson('/api/v1/sessions/current/command-trace'); }
 export async function fetchCurrentAssessment(): Promise<AssessmentEnvelope> { return fetchJson('/api/v1/sessions/current/assessment'); }
 export async function fetchCurrentContact(): Promise<ContactEnvelope> { return fetchJson('/api/v1/sessions/current/contact'); }
@@ -683,8 +710,27 @@ export async function fetchCurrentSelectedExecutionRationale(): Promise<Selected
   return response.json();
 }
 
+export async function fetchCurrentEvidenceSeal(): Promise<SessionEvidenceSealEnvelope> { return fetchJson('/api/v1/sessions/current/evidence-seal'); }
+
 export async function fetchCurrentReleaseGateDecision(): Promise<ReleaseGateDecisionEnvelope> {
   const response = await fetch(apiUrl('/api/v1/sessions/current/release-gate'));
   if (!response.ok) throw new Error(await response.text());
   return response.json();
+}
+
+
+async function fetchJsonPost<T>(path: string, payload: Record<string, unknown>): Promise<T> {
+  const response = await fetch(apiUrl(path), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Spine-Role': 'operator',
+      'X-Spine-Actor': 'web-operator',
+      'X-Spine-Workspace': 'operator',
+    },
+    body: JSON.stringify(payload),
+  });
+  const body = (await response.json()) as unknown;
+  if (!response.ok) throw new Error(readErrorDetail(body));
+  return body as T;
 }

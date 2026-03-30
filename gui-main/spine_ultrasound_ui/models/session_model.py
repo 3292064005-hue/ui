@@ -303,6 +303,7 @@ class SessionManifest:
     processing_steps: List[Dict[str, Any]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     alarms_summary: Dict[str, Any] = field(default_factory=dict)
+    control_authority: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

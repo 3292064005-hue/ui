@@ -7,9 +7,9 @@ import {
   type ProtocolSchema,
   type WorkspaceRole,
 } from './api/client';
-import { useTelemetryStore } from './store/telemetryStore';
-import { useSessionStore } from './store/sessionStore';
-import { useUIStore, type Workspace } from './store/uiStore';
+import { useTelemetryStore } from './state/telemetryStore';
+import { useSessionStore } from './state/sessionStore';
+import { useUIStore, type Workspace } from './state/uiStore';
 import { useTelemetrySocket } from './hooks/useWebSocket';
 import { useHeadlessSessionSync } from './hooks/useHeadlessSessionSync';
 import { useCommandPolicySync } from './hooks/useCommandPolicySync';

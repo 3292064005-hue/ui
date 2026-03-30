@@ -1,5 +1,5 @@
 import type { HealthEnvelope } from '../api/client';
-import type { AlarmEntry } from '../store/sessionStore';
+import type { AlarmEntry } from '../state/sessionStore';
 
 function adviceFor(state: string | undefined): string {
   switch (state) {

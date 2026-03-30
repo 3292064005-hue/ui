@@ -2,7 +2,7 @@ import { useRef } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Grid, Environment } from '@react-three/drei';
 import * as THREE from 'three';
-import { useTelemetryStore } from '../store/telemetryStore';
+import { useTelemetryStore } from '../state/telemetryStore';
 
 /** Animated probe mesh — bobs based on real force telemetry */
 function UltrasoundProbe({ targetForce, maxForce }: { targetForce: number; maxForce: number }) {

@@ -1,5 +1,5 @@
-import { useUIStore } from '../store/uiStore';
-import { useSessionStore } from '../store/sessionStore';
+import { useUIStore } from '../state/uiStore';
+import { useSessionStore } from '../state/sessionStore';
 import {
   ActivitySquare,
   ChevronLeft,

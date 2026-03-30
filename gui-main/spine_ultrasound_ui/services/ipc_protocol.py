@@ -38,6 +38,18 @@ COMMAND_SPECS: dict[str, dict[str, Any]] = {
         "required_payload_fields": [],
         "state_preconditions": ["CONNECTED", "POWERED", "AUTO_READY", "SESSION_LOCKED", "PATH_VALIDATED"],
     },
+    "compile_scan_plan": {
+        "required_payload_fields": ["scan_plan"],
+        "required_nested_fields": {"scan_plan": ["plan_id", "segments", "plan_hash"]},
+        "field_types": {"scan_plan": "object", "config_snapshot": "object"},
+        "state_preconditions": ["AUTO_READY", "SESSION_LOCKED", "PATH_VALIDATED", "SCAN_COMPLETE"],
+        "write_command": False,
+    },
+    "query_final_verdict": {
+        "required_payload_fields": [],
+        "state_preconditions": ["*"],
+        "write_command": False,
+    },
     "lock_session": {
         "required_payload_fields": ["session_id", "session_dir", "config_snapshot", "device_roster", "scan_plan_hash"],
         "field_types": {
@@ -144,6 +156,11 @@ TELEMETRY_TOPIC_SCHEMAS: dict[str, dict[str, Any]] = {
 }
 
 COMMANDS = set(COMMAND_SPECS)
+
+
+def is_write_command(command: str) -> bool:
+    spec = COMMAND_SPECS.get(command, {})
+    return bool(spec.get("write_command", True))
 TELEMETRY_TOPICS = set(TELEMETRY_TOPIC_SCHEMAS)
 
 try:

@@ -46,6 +46,7 @@ _ARTIFACT_SCHEMA_HINTS = {
     "command_state_policy": "runtime/command_state_policy_v1.schema.json",
     "command_policy_snapshot": "session/command_policy_snapshot_v1.schema.json",
     "contract_kernel_diff": "session/contract_kernel_diff_v1.schema.json",
+    "session_evidence_seal": "session/session_evidence_seal_v1.schema.json",
 }
 
 
@@ -117,6 +118,7 @@ class ExperimentManager:
         robot_profile: Dict[str, Any] | None = None,
         patient_registration: Dict[str, Any] | None = None,
         scan_protocol: Dict[str, Any] | None = None,
+        control_authority: Dict[str, Any] | None = None,
     ) -> dict:
         exp_dir = self.root / exp_id
         session_id = self.make_session_id(exp_id)
@@ -287,7 +289,7 @@ class ExperimentManager:
             return "preprocess"
         if name in {"frame_sync_index", "replay_index"}:
             return "reconstruction"
-        if name in {"session_report", "session_compare", "session_trends", "diagnostics_pack", "qa_pack", "session_integrity", "lineage", "resume_state", "resume_decision", "resume_attempts", "resume_attempt_outcomes", "recovery_report", "operator_incident_report", "session_incidents", "event_log_index", "recovery_decision_timeline", "contract_consistency", "release_evidence_pack", "release_gate_decision", "command_state_policy", "event_delivery_summary", "selected_execution_rationale"}:
+        if name in {"session_report", "session_compare", "session_trends", "diagnostics_pack", "qa_pack", "session_integrity", "lineage", "resume_state", "resume_decision", "resume_attempts", "resume_attempt_outcomes", "recovery_report", "operator_incident_report", "session_incidents", "event_log_index", "recovery_decision_timeline", "contract_consistency", "release_evidence_pack", "release_gate_decision", "command_state_policy", "event_delivery_summary", "selected_execution_rationale", "control_plane_snapshot", "control_authority_snapshot", "bridge_observability_report", "artifact_registry_snapshot", "session_evidence_seal"}:
             return "assessment"
         return "session_service"
 
@@ -320,6 +322,11 @@ class ExperimentManager:
             "selected_execution_rationale": ["scan_plan"],
             "contract_consistency": ["scan_plan", "session_integrity", "diagnostics_pack", "resume_decision", "event_log_index"],
             "release_evidence_pack": ["contract_consistency", "session_integrity", "diagnostics_pack", "event_log_index", "recovery_decision_timeline", "session_report", "qa_pack"],
-            "release_gate_decision": ["contract_consistency", "release_evidence_pack", "event_delivery_summary", "resume_attempt_outcomes", "selected_execution_rationale"],
+            "release_gate_decision": ["contract_consistency", "release_evidence_pack", "event_delivery_summary", "resume_attempt_outcomes", "selected_execution_rationale", "session_evidence_seal"],
+            "control_plane_snapshot": ["summary_json", "release_gate_decision", "contract_consistency", "session_evidence_seal"],
+            "control_authority_snapshot": ["summary_json", "scan_plan"],
+            "bridge_observability_report": ["summary_json", "event_delivery_summary"],
+            "artifact_registry_snapshot": ["scan_plan", "diagnostics_pack", "release_gate_decision"],
+            "session_evidence_seal": ["control_plane_snapshot", "release_gate_decision", "artifact_registry_snapshot"],
         }
         return list(mapping.get(name, []))

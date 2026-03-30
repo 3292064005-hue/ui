@@ -34,7 +34,9 @@ class RoleMatrix:
         self._roles = {
             "operator": RolePolicy("operator", True, True, ("control", "recovery", "export"), True),
             "researcher": RolePolicy("researcher", True, True, tuple(), True),
-            "reviewer": RolePolicy("reviewer", False, True, tuple(), True),
+            "qa": RolePolicy("qa", True, True, tuple(), True),
+            "review": RolePolicy("review", True, True, tuple(), True),
+            "reviewer": RolePolicy("reviewer", True, True, tuple(), True),
             "service": RolePolicy("service", True, True, ("control", "recovery"), False),
             "admin": RolePolicy("admin", True, True, ("control", "recovery", "export"), True),
             "read_only": RolePolicy("read_only", False, True, tuple(), False),

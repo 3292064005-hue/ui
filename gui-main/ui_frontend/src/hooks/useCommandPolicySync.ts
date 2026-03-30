@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { fetchCommandPolicies, type CommandPolicyCatalogEnvelope } from "../api/client";
-import { useAuthzDomainStore } from "../stores/authzStore";
-import { useRuntimeDomainStore } from "../stores/runtimeStore";
+import { useAuthzDomainStore } from "../state/authzDomainStore";
+import { useRuntimeDomainStore } from "../state/runtimeDomainStore";
 
 interface UseCommandPolicySyncOptions {
   workspace: string;

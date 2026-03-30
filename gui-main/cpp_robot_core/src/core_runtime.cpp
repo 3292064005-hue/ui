@@ -49,6 +49,25 @@ std::vector<double> filledVector(size_t count, double value) {
   return std::vector<double>(count, value);
 }
 
+std::string objectArray(const std::vector<std::string>& entries) {
+  std::string out = "[";
+  for (size_t idx = 0; idx < entries.size(); ++idx) {
+    if (idx > 0) {
+      out += ",";
+    }
+    out += entries[idx];
+  }
+  out += "]";
+  return out;
+}
+
+std::string summaryEntry(const std::string& name, const std::string& detail) {
+  return json::object({
+      json::field("name", json::quote(name)),
+      json::field("detail", json::quote(detail)),
+  });
+}
+
 }  // namespace
 
 CoreRuntime::CoreRuntime() {
@@ -123,6 +142,7 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
     contact_state_ = ContactTelemetry{};
     pending_alarms_.clear();
     recovery_manager_.resetToIdle();
+    last_final_verdict_ = FinalVerdict{};
     devices_ = {
         makeDevice("robot", false, "机械臂控制器未连接"),
         makeDevice("camera", false, "摄像头未连接"),
@@ -167,6 +187,16 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
     });
     return replyJson(request_id, safety.safe_to_arm, safety.safe_to_arm ? "setup validated" : "setup invalid", data_json);
   }
+  if (command == "compile_scan_plan") {
+    const auto verdict = compileScanPlanVerdictLocked(line);
+    last_final_verdict_ = verdict;
+    const auto verdict_json = finalVerdictJson(verdict);
+    return replyJson(request_id, verdict.accepted, verdict.accepted ? "compile_scan_plan accepted" : "compile_scan_plan rejected", json::object({json::field("final_verdict", verdict_json)}));
+  }
+  if (command == "query_final_verdict") {
+    const auto verdict_json = finalVerdictJson(last_final_verdict_);
+    return replyJson(request_id, true, "final verdict snapshot", json::object({json::field("final_verdict", verdict_json)}));
+  }
   if (command == "lock_session") {
     if (execution_state_ != RobotCoreState::AutoReady) {
       return replyJson(request_id, false, "core not ready for session lock");
@@ -196,6 +226,16 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
     }
     execution_state_ = RobotCoreState::PathValidated;
     state_reason_ = "scan_plan_validated";
+    if (last_final_verdict_.plan_hash.empty() || last_final_verdict_.plan_hash == plan_hash_) {
+      last_final_verdict_.accepted = true;
+      last_final_verdict_.reason = "scan plan validated and loaded";
+      last_final_verdict_.detail = "scan plan validated and loaded";
+      last_final_verdict_.policy_state = "ready";
+      last_final_verdict_.next_state = "approach_prescan";
+      last_final_verdict_.plan_id = plan_id_;
+      last_final_verdict_.plan_hash = plan_hash_;
+      last_final_verdict_.summary_label = "模型前检通过";
+    }
     return replyJson(request_id, true, "load_scan_plan accepted", json::object({json::field("plan_id", json::quote(plan_id_))}));
   }
   if (command == "approach_prescan") {
@@ -660,6 +700,100 @@ void CoreRuntime::loadPlanFromJsonLocked(const std::string& json_line) {
   progress_pct_ = 0.0;
   active_segment_ = total_segments_ > 0 ? plan.segments.front().segment_id : 0;
   plan_loaded_ = total_segments_ > 0;
+}
+
+FinalVerdict CoreRuntime::compileScanPlanVerdictLocked(const std::string& json_line) {
+  applyConfigFromJsonLocked(json_line);
+  const auto plan_json = json::extractObject(json_line, "scan_plan", "{}");
+  auto plan = scan_plan_parser_.parseJsonEnvelope(plan_json == "{}" ? json_line : plan_json);
+  if (plan.plan_hash.empty()) {
+    plan.plan_hash = json::extractString(json_line, "scan_plan_hash", plan_hash_);
+  }
+  FinalVerdict verdict;
+  verdict.source = "cpp_robot_core";
+  verdict.plan_id = plan.plan_id;
+  verdict.plan_hash = plan.plan_hash;
+  verdict.evidence_id = std::string("cpp-final-verdict:") + (plan.plan_hash.empty() ? std::string("no-plan") : plan.plan_hash) + ":" + (session_id_.empty() ? std::string("unlocked") : session_id_);
+
+  std::string error;
+  if (!scan_plan_validator_.validate(plan, &error)) {
+    verdict.accepted = false;
+    verdict.reason = error;
+    verdict.detail = error;
+    verdict.policy_state = "blocked";
+    verdict.summary_label = "模型前检阻塞";
+    verdict.next_state = "replan_required";
+    verdict.blockers.push_back(error);
+    return verdict;
+  }
+
+  if (config_.rt_mode != "cartesianImpedance") {
+    verdict.blockers.push_back("clinical mainline requires cartesianImpedance rt_mode");
+  }
+  if (config_.tool_name.empty()) {
+    verdict.blockers.push_back("tool_name missing");
+  }
+  if (config_.tcp_name.empty()) {
+    verdict.blockers.push_back("tcp_name missing");
+  }
+  if (config_.load_kg <= 0.0) {
+    verdict.blockers.push_back("load_kg must be positive");
+  }
+  const auto safety = evaluateSafetyLocked();
+  if (!safety.active_interlocks.empty()) {
+    verdict.warnings.push_back("active interlocks present during compile");
+  }
+  if (!session_id_.empty() && !plan.session_id.empty() && plan.session_id != session_id_) {
+    verdict.warnings.push_back("plan session_id differs from locked session");
+  }
+  if (plan.execution_constraints.max_segment_duration_ms == 0) {
+    verdict.warnings.push_back("execution constraint max_segment_duration_ms not set");
+  }
+
+  verdict.accepted = verdict.blockers.empty();
+  verdict.policy_state = verdict.accepted ? (verdict.warnings.empty() ? "ready" : "warning") : "blocked";
+  verdict.summary_label = verdict.accepted ? (verdict.warnings.empty() ? "模型前检通过" : "模型前检告警") : "模型前检阻塞";
+  verdict.next_state = verdict.accepted ? "lock_session" : "replan_required";
+  verdict.reason = verdict.accepted ? (verdict.warnings.empty() ? "scan plan compiled successfully" : "scan plan compiled with warnings") : verdict.blockers.front();
+  verdict.detail = verdict.accepted ? (verdict.warnings.empty() ? "scan plan compiled successfully" : "scan plan compiled with warnings") : verdict.blockers.front();
+  return verdict;
+}
+
+std::string CoreRuntime::finalVerdictJson(const FinalVerdict& verdict) const {
+  using namespace json;
+  std::vector<std::string> blocker_entries;
+  blocker_entries.reserve(verdict.blockers.size());
+  for (const auto& item : verdict.blockers) {
+    blocker_entries.push_back(summaryEntry("model_precheck", item));
+  }
+  std::vector<std::string> warning_entries;
+  warning_entries.reserve(verdict.warnings.size());
+  for (const auto& item : verdict.warnings) {
+    warning_entries.push_back(summaryEntry("model_precheck", item));
+  }
+  return object({
+      field("summary_state", quote(verdict.policy_state.empty() ? std::string("idle") : verdict.policy_state)),
+      field("summary_label", quote(verdict.summary_label.empty() ? std::string("运行时前检") : verdict.summary_label)),
+      field("detail", quote(verdict.detail.empty() ? verdict.reason : verdict.detail)),
+      field("warnings", objectArray(warning_entries)),
+      field("blockers", objectArray(blocker_entries)),
+      field("authority_source", quote(verdict.source.empty() ? std::string("cpp_robot_core") : verdict.source)),
+      field("verdict_kind", quote("final")),
+      field("approximate", boolLiteral(false)),
+      field("final_verdict", object({
+          field("accepted", boolLiteral(verdict.accepted)),
+          field("reason", quote(verdict.reason)),
+          field("evidence_id", quote(verdict.evidence_id)),
+          field("expected_state_delta", object({field("next_state", quote(verdict.next_state.empty() ? std::string("replan_required") : verdict.next_state))})),
+          field("policy_state", quote(verdict.policy_state.empty() ? std::string("idle") : verdict.policy_state)),
+          field("source", quote(verdict.source.empty() ? std::string("cpp_robot_core") : verdict.source)),
+          field("advisory_only", boolLiteral(verdict.advisory_only)),
+      })),
+      field("plan_metrics", object({
+          field("plan_id", quote(verdict.plan_id)),
+          field("plan_hash", quote(verdict.plan_hash)),
+      })),
+  });
 }
 
 std::string CoreRuntime::replyJson(const std::string& request_id, bool ok, const std::string& message, const std::string& data_json) const {

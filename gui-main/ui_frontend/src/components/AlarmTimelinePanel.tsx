@@ -1,4 +1,4 @@
-import type { AlarmEntry } from '../store/sessionStore';
+import type { AlarmEntry } from '../state/sessionStore';
 
 interface AlarmTimelinePanelProps {
   alarms: AlarmEntry[];

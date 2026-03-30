@@ -6,10 +6,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from spine_ultrasound_ui.core.session_recorders import JsonlRecorder
-from spine_ultrasound_ui.models import RuntimeConfig, SystemState
+from spine_ultrasound_ui.models import RuntimeConfig, ScanPlan, SystemState
 from spine_ultrasound_ui.services.force_control_config import load_force_control_config
 from spine_ultrasound_ui.services.ipc_protocol import ReplyEnvelope, TelemetryEnvelope
 from spine_ultrasound_ui.services.pressure_sensor_service import ForceSensorProvider, create_force_sensor_provider
+from spine_ultrasound_ui.services.xmate_model_service import XMateModelService
 from spine_ultrasound_ui.utils import ensure_dir, now_ns
 
 
@@ -43,6 +44,26 @@ class MockCoreRuntime:
         self.quality_score = 0.79
         self.last_event = "-"
         self.last_controller_log = "-"
+        self.controller_logs: list[dict[str, Any]] = [
+            {"level": "INFO", "message": "mock runtime booted", "source": "runtime"},
+        ]
+        self.rl_projects: list[dict[str, Any]] = [
+            {"name": "spine_mainline", "tasks": ["scan", "prep", "retreat"]},
+            {"name": "spine_research", "tasks": ["sweep", "contact_probe"]},
+        ]
+        self.rl_status = {"loaded_project": "", "loaded_task": "", "running": False, "rate": 1.0, "loop": False}
+        self.path_library: list[dict[str, Any]] = [
+            {"name": "spine_demo_path", "rate": 0.5, "points": 128},
+            {"name": "thoracic_followup", "rate": 0.4, "points": 92},
+        ]
+        self.drag_state = {"enabled": False, "space": "cartesian", "type": "admittance"}
+        self.io_state = {
+            "di": {"board0_port0": False, "board0_port1": True},
+            "do": {"board0_port0": False, "board0_port1": False},
+            "ai": {"board0_port0": 0.12},
+            "ao": {"board0_port0": 0.0},
+            "registers": {"spine.session.segment": 0, "spine.session.frame": 0},
+        }
         self.retreat_ticks_remaining = 0
         self.dropped_samples = 0
         self.last_flush_ns = 0
@@ -73,11 +94,14 @@ class MockCoreRuntime:
         self.joint_torque = [0.0] * 6
         self.cart_force = [0.0] * 6
         self.pending_alarms: list[dict[str, Any]] = []
+        self.model_service = XMateModelService()
+        self.last_final_verdict: dict[str, Any] = {}
 
     def update_runtime_config(self, config: RuntimeConfig) -> None:
         self.config = config
         self.force_sensor_provider_name = config.force_sensor_provider
         self.force_sensor_provider = create_force_sensor_provider(config.force_sensor_provider)
+        self._append_controller_log("INFO", f"runtime config updated: rt_mode={config.rt_mode}, collision={config.collision_detection_enabled}, soft_limit={config.soft_limit_enabled}")
 
     def handle_command(self, command: str, payload: Optional[dict] = None) -> ReplyEnvelope:
         payload = payload or {}
@@ -130,6 +154,8 @@ class MockCoreRuntime:
                     "tcp_pose": self.tcp_pose,
                     "last_event": self.last_event,
                     "last_controller_log": self.last_controller_log,
+                    "rl_status": dict(self.rl_status),
+                    "drag_state": dict(self.drag_state),
                 },
             ),
             TelemetryEnvelope(
@@ -181,6 +207,104 @@ class MockCoreRuntime:
         self.pending_alarms.clear()
         return messages
 
+    def _append_controller_log(self, level: str, message: str, source: str = "sdk") -> None:
+        self.last_controller_log = f"{level}: {message}"
+        self.controller_logs.insert(0, {"level": level, "message": message, "source": source})
+        self.controller_logs = self.controller_logs[:40]
+
+    def _cmd_query_controller_log(self, payload: dict) -> ReplyEnvelope:
+        count = int(payload.get("count", 10) or 10)
+        return ReplyEnvelope(ok=True, message="query_controller_log accepted", data={"logs": self.controller_logs[:max(1, count)]})
+
+    def _cmd_query_rl_projects(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="query_rl_projects accepted", data={"projects": list(self.rl_projects), "status": dict(self.rl_status)})
+
+    def _cmd_run_rl_project(self, payload: dict) -> ReplyEnvelope:
+        project = str(payload.get("project", self.config.rl_project_name or "spine_mainline"))
+        task = str(payload.get("task", self.config.rl_task_name or "scan"))
+        candidates = {item["name"]: item for item in self.rl_projects}
+        if project not in candidates:
+            return ReplyEnvelope(ok=False, message=f"unknown RL project: {project}")
+        if task not in list(candidates[project].get("tasks", [])):
+            return ReplyEnvelope(ok=False, message=f"unknown RL task: {task}")
+        self.rl_status.update({"loaded_project": project, "loaded_task": task, "running": True})
+        self.execution_state = SystemState.AUTO_READY if self.execution_state in {SystemState.CONNECTED, SystemState.POWERED} else self.execution_state
+        self._append_controller_log("INFO", f"RL project started: {project}/{task}")
+        return ReplyEnvelope(ok=True, message="run_rl_project accepted", data={"status": dict(self.rl_status)})
+
+    def _cmd_pause_rl_project(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        self.rl_status["running"] = False
+        self._append_controller_log("INFO", "RL project paused")
+        return ReplyEnvelope(ok=True, message="pause_rl_project accepted", data={"status": dict(self.rl_status)})
+
+    def _cmd_query_path_lists(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="query_path_lists accepted", data={"paths": list(self.path_library), "drag": dict(self.drag_state)})
+
+    def _cmd_enable_drag(self, payload: dict) -> ReplyEnvelope:
+        self.drag_state = {
+            "enabled": True,
+            "space": str(payload.get("space", "cartesian")),
+            "type": str(payload.get("type", "admittance")),
+        }
+        self._append_controller_log("INFO", f"drag enabled: {self.drag_state['space']}/{self.drag_state['type']}")
+        return ReplyEnvelope(ok=True, message="enable_drag accepted", data={"drag": dict(self.drag_state)})
+
+    def _cmd_disable_drag(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        self.drag_state["enabled"] = False
+        self._append_controller_log("INFO", "drag disabled")
+        return ReplyEnvelope(ok=True, message="disable_drag accepted", data={"drag": dict(self.drag_state)})
+
+    def _cmd_replay_path(self, payload: dict) -> ReplyEnvelope:
+        path_name = str(payload.get("name", "spine_demo_path"))
+        match = next((item for item in self.path_library if item.get("name") == path_name), None)
+        if match is None:
+            return ReplyEnvelope(ok=False, message=f"unknown path: {path_name}")
+        self._append_controller_log("INFO", f"path replay started: {path_name}")
+        return ReplyEnvelope(ok=True, message="replay_path accepted", data={"path": dict(match)})
+
+    def _cmd_get_io_snapshot(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        snapshot = dict(self.io_state)
+        snapshot["xpanel_vout_mode"] = self.config.xpanel_vout_mode
+        return ReplyEnvelope(ok=True, message="get_io_snapshot accepted", data=snapshot)
+
+    def _cmd_get_safety_config(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(
+            ok=True,
+            message="get_safety_config accepted",
+            data={
+                "collision_detection_enabled": self.config.collision_detection_enabled,
+                "collision_sensitivity": self.config.collision_sensitivity,
+                "collision_behavior": self.config.collision_behavior,
+                "collision_fallback_mm": self.config.collision_fallback_mm,
+                "soft_limit_enabled": self.config.soft_limit_enabled,
+                "joint_soft_limit_margin_deg": self.config.joint_soft_limit_margin_deg,
+                "singularity_avoidance_enabled": self.config.singularity_avoidance_enabled,
+            },
+        )
+
+    def _cmd_get_motion_contract(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(
+            ok=True,
+            message="get_motion_contract accepted",
+            data={
+                "rt_mode": self.config.rt_mode,
+                "network_tolerance_percent": self.config.rt_network_tolerance_percent,
+                "preferred_link": self.config.preferred_link,
+                "filters": {
+                    "joint_hz": self.config.joint_filter_hz,
+                    "cart_hz": self.config.cart_filter_hz,
+                    "torque_hz": self.config.torque_filter_hz,
+                },
+            },
+        )
+
     def _cmd_connect_robot(self, payload: dict) -> ReplyEnvelope:
         del payload
         if self.execution_state not in {SystemState.BOOT, SystemState.DISCONNECTED}:
@@ -194,6 +318,7 @@ class MockCoreRuntime:
             "ultrasound": self._device(True, "online", "超声设备在线"),
         }
         self.last_event = "robot_connected"
+        self._append_controller_log("INFO", f"robot connected: remote={self.config.remote_ip} local={self.config.local_ip}")
         return ReplyEnvelope(ok=True, message="connect_robot accepted")
 
     def _cmd_disconnect_robot(self, payload: dict) -> ReplyEnvelope:
@@ -210,6 +335,7 @@ class MockCoreRuntime:
         self.powered = True
         self.execution_state = SystemState.POWERED
         self.last_event = "power_on"
+        self._append_controller_log("INFO", "power on")
         return ReplyEnvelope(ok=True, message="power_on accepted")
 
     def _cmd_power_off(self, payload: dict) -> ReplyEnvelope:
@@ -226,6 +352,7 @@ class MockCoreRuntime:
             return ReplyEnvelope(ok=False, message="robot not powered")
         self.operate_mode = "automatic"
         self.execution_state = SystemState.AUTO_READY
+        self._append_controller_log("INFO", "operate mode -> automatic")
         return ReplyEnvelope(ok=True, message="set_auto_mode accepted")
 
     def _cmd_set_manual_mode(self, payload: dict) -> ReplyEnvelope:
@@ -258,6 +385,7 @@ class MockCoreRuntime:
         self.force_sensor_provider = create_force_sensor_provider(self.force_sensor_provider_name)
         self._open_recorders(self.session_dir, self.session_id)
         self.execution_state = SystemState.SESSION_LOCKED
+        self._append_controller_log("INFO", f"session locked: {self.session_id}")
         self.recovery_reason = ""
         self.last_recovery_action = "session_locked"
         self.last_event = "session_locked"
@@ -276,6 +404,7 @@ class MockCoreRuntime:
         self.progress_pct = 0.0
         self.active_segment = 0
         self.execution_state = SystemState.PATH_VALIDATED
+        self._append_controller_log("INFO", f"scan plan loaded: {plan_payload.get('plan_id', '-')}")
         self.contact_stable = False
         self.recovery_reason = ""
         self.last_recovery_action = "load_scan_plan"
@@ -314,6 +443,7 @@ class MockCoreRuntime:
         self.last_recovery_action = "start_scan"
         self.recommended_action = "SCAN"
         self.last_event = "scan_started"
+        self._append_controller_log("INFO", "scan started")
         return ReplyEnvelope(ok=True, message="start_scan accepted")
 
     def _cmd_pause_scan(self, payload: dict) -> ReplyEnvelope:
@@ -352,12 +482,14 @@ class MockCoreRuntime:
         self.last_recovery_action = "safe_retreat"
         self.recommended_action = "WAIT_RETREAT_COMPLETE"
         self.last_event = "safe_retreat"
+        self._append_controller_log("WARN", "safe retreat requested")
         return ReplyEnvelope(ok=True, message="safe_retreat accepted")
 
     def _cmd_go_home(self, payload: dict) -> ReplyEnvelope:
         del payload
         self.tcp_pose = {"x": 0.0, "y": 0.0, "z": 240.0, "rx": 180.0, "ry": 0.0, "rz": 90.0}
         self.last_event = "go_home"
+        self._append_controller_log("INFO", "go home")
         return ReplyEnvelope(ok=True, message="go_home accepted")
 
     def _cmd_clear_fault(self, payload: dict) -> ReplyEnvelope:
@@ -374,6 +506,7 @@ class MockCoreRuntime:
         self.fault_code = "ESTOP"
         self.last_event = "emergency_stop"
         self._queue_alarm("FATAL_FAULT", "safety", "急停触发", workflow_step="emergency_stop", auto_action="estop")
+        self._append_controller_log("ERROR", "emergency stop")
         return ReplyEnvelope(ok=True, message="emergency_stop accepted")
 
     def _update_robot_kinematics(self) -> None:
@@ -477,6 +610,8 @@ class MockCoreRuntime:
             self.contact_stable = False
             self.recommended_action = "IDLE"
         self.cart_force = [0.02, 0.01, round(self.pressure_current, 3), 0.0, 0.0, 0.0]
+        self.io_state["registers"]["spine.session.segment"] = int(self.active_segment)
+        self.io_state["registers"]["spine.session.frame"] = int(self.frame_id)
 
     def _segment_for_path_index(self) -> int:
         if not self.scan_plan:
@@ -553,6 +688,9 @@ class MockCoreRuntime:
             "warning_z_force_n": self.force_control["warning_z_force_n"],
             "max_xy_force_n": self.force_control["max_xy_force_n"],
             "desired_contact_force_n": self.force_control["desired_contact_force_n"],
+            "collision_detection_enabled": self.config.collision_detection_enabled,
+            "soft_limit_enabled": self.config.soft_limit_enabled,
+            "singularity_avoidance_enabled": self.config.singularity_avoidance_enabled,
         }
 
     def _refresh_device_health(self, ts_ns: int) -> None:
@@ -686,7 +824,7 @@ class MockCoreRuntime:
         recorder = self.recorders.get("alarm_event")
         if recorder is not None:
             recorder.append(alarm, source_ts_ns=ts_ns)
-        self.last_controller_log = message
+        self._append_controller_log(severity, message, source)
         if severity == "FATAL_FAULT":
             self.fault_code = source.upper()
             self.recovery_reason = source
@@ -729,3 +867,55 @@ class MockCoreRuntime:
             "fresh": connected,
             "last_ts_ns": 0,
         }
+
+
+    def compile_scan_plan_verdict(self, plan_payload: dict[str, Any] | None, config_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+        config = RuntimeConfig(**dict(config_snapshot or self.config.to_dict()))
+        plan = None
+        if plan_payload:
+            try:
+                plan = ScanPlan.from_dict(dict(plan_payload))
+            except Exception:
+                plan = None
+        advisory = self.model_service.build_report(plan, config)
+        summary_state = str(advisory.get('summary_state', 'idle'))
+        accepted = summary_state not in {'blocked'}
+        evidence_id = f"mock-verdict:{plan.plan_id if plan is not None else 'none'}:{self.session_id or 'unlocked'}"
+        verdict = {
+            'summary_state': summary_state,
+            'summary_label': {
+                'ready': '模型前检通过',
+                'warning': '模型前检告警',
+                'blocked': '模型前检阻塞',
+                'idle': '未生成路径',
+            }.get(summary_state, '运行时前检'),
+            'detail': str(advisory.get('detail', '')),
+            'warnings': list(advisory.get('warnings', [])),
+            'blockers': list(advisory.get('blockers', [])),
+            'authority_source': 'cpp_robot_core',
+            'verdict_kind': 'final',
+            'approximate': False,
+            'model_contract': dict(advisory.get('model_contract', {})),
+            'plan_metrics': dict(advisory.get('plan_metrics', {})),
+            'execution_selection': dict(advisory.get('execution_selection', {})),
+            'advisory_python': advisory,
+            'final_verdict': {
+                'accepted': accepted,
+                'reason': str(advisory.get('detail', '')),
+                'evidence_id': evidence_id,
+                'expected_state_delta': {'next_state': 'lock_session' if accepted else 'replan_required'},
+                'policy_state': summary_state,
+                'source': 'cpp_robot_core',
+                'advisory_only': False,
+            },
+        }
+        self.last_final_verdict = verdict
+        return verdict
+
+    def _cmd_compile_scan_plan(self, payload: dict) -> ReplyEnvelope:
+        verdict = self.compile_scan_plan_verdict(payload.get('scan_plan'), payload.get('config_snapshot'))
+        return ReplyEnvelope(ok=bool(verdict.get('final_verdict', {}).get('accepted', False)), message=str(verdict.get('detail', 'compile_scan_plan evaluated')), data={'final_verdict': verdict})
+
+    def _cmd_query_final_verdict(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message='final verdict snapshot', data={'final_verdict': dict(self.last_final_verdict)})

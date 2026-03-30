@@ -52,10 +52,16 @@ class OverviewPage(QWidget):
 
         info_box = QGroupBox("最近一次实验摘要")
         info_layout = QVBoxLayout(info_box)
+        self.recommended_label = QLabel("建议下一步：等待系统满足条件")
+        self.recommended_label.setObjectName("FieldValue")
+        self.readiness_label = QLabel("流程就绪度：0 / 0")
+        self.readiness_label.setObjectName("MutedLabel")
         self.overview_text = QTextEdit()
         self.overview_text.setReadOnly(True)
-        self.overview_text.setMinimumHeight(260)
+        self.overview_text.setMinimumHeight(220)
         self.overview_text.setPlaceholderText("实验摘要、接触状态、质量评分与建议动作将在这里汇总。")
+        info_layout.addWidget(self.recommended_label)
+        info_layout.addWidget(self.readiness_label)
         info_layout.addWidget(self.overview_text)
         middle_grid.addWidget(info_box, 0, 1)
 

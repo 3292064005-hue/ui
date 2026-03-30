@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { buildTelemetryWsUrl, parseTelemetryMessage } from '../api/client';
-import { useTelemetryStore } from '../store/telemetryStore';
-import { useSessionStore } from '../store/sessionStore';
-import type { Workspace } from '../store/uiStore';
+import { useTelemetryStore } from '../state/telemetryStore';
+import { useSessionStore } from '../state/sessionStore';
+import type { Workspace } from '../state/uiStore';
 
 const MAX_BACKOFF = 8000;
 const EMPTY_JOINTS = [0, 0, 0, 0, 0, 0];

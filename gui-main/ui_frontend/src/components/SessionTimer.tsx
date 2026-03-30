@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useSessionStore } from '../store/sessionStore';
+import { useSessionStore } from '../state/sessionStore';
 import { Timer } from 'lucide-react';
 
 export default function SessionTimer() {

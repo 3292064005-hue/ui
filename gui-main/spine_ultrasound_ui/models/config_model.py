@@ -28,6 +28,8 @@ class RuntimeConfig:
     tool_name: str = "ultrasound_probe"
     tcp_name: str = "ultrasound_tcp"
     load_kg: float = 0.85
+    remote_ip: str = "192.168.0.160"
+    local_ip: str = "192.168.0.100"
     force_sensor_provider: str = "mock_force_sensor"
     robot_model: str = "xmate_er3"
     axis_count: int = 6
@@ -40,6 +42,16 @@ class RuntimeConfig:
     joint_filter_hz: float = 40.0
     cart_filter_hz: float = 30.0
     torque_filter_hz: float = 25.0
+    collision_detection_enabled: bool = True
+    collision_sensitivity: int = 4
+    collision_behavior: str = "pause_hold"
+    collision_fallback_mm: float = 8.0
+    soft_limit_enabled: bool = True
+    joint_soft_limit_margin_deg: float = 5.0
+    singularity_avoidance_enabled: bool = True
+    rl_project_name: str = "spine_mainline"
+    rl_task_name: str = "scan"
+    xpanel_vout_mode: str = "off"
     cartesian_impedance: List[float] = field(default_factory=lambda: [2200.0, 2200.0, 1400.0, 45.0, 45.0, 35.0])
     desired_wrench_n: List[float] = field(default_factory=lambda: [0.0, 0.0, 8.0, 0.0, 0.0, 0.0])
     fc_frame_type: str = "path"

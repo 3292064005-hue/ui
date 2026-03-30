@@ -104,6 +104,22 @@ struct ScanPlan {
   int64_t created_ts_ns{0};
 };
 
+struct FinalVerdict {
+  bool accepted{false};
+  std::string reason;
+  std::string evidence_id;
+  std::string policy_state{"blocked"};
+  std::string source{"cpp_robot_core"};
+  std::string next_state{"replan_required"};
+  std::string summary_label{"模型前检阻塞"};
+  std::string detail;
+  std::string plan_id;
+  std::string plan_hash;
+  bool advisory_only{false};
+  std::vector<std::string> warnings;
+  std::vector<std::string> blockers;
+};
+
 struct CoreStateSnapshot {
   RobotCoreState execution_state{RobotCoreState::Boot};
   bool armed{false};

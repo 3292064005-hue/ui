@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { Workspace } from '../store/uiStore';
+import type { Workspace } from '../state/uiStore';
 import OperatorWorkspace from './operator';
 import ResearchWorkspace from './research';
 import QaWorkspace from './qa';

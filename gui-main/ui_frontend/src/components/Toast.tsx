@@ -1,4 +1,4 @@
-import { useUIStore } from '../store/uiStore';
+import { useUIStore } from '../state/uiStore';
 import { ShieldCheck, ShieldAlert, Info, AlertTriangle } from 'lucide-react';
 
 const iconMap = {

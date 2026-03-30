@@ -17,6 +17,7 @@ from spine_ultrasound_ui.core.session_recorders import FrameRecorder, JsonlRecor
 from spine_ultrasound_ui.models import ExperimentRecord, RuntimeConfig, ScanPlan
 from spine_ultrasound_ui.services.export_service import export_text_report
 from spine_ultrasound_ui.services.session_intelligence_service import SessionIntelligenceService
+from spine_ultrasound_ui.services.session_evidence_seal_service import SessionEvidenceSealService
 
 
 @dataclass
@@ -40,6 +41,7 @@ class SessionService:
         self.command_journal: Optional[JsonlRecorder] = None
         self.annotation_journal: Optional[JsonlRecorder] = None
         self.session_intelligence = SessionIntelligenceService()
+        self.evidence_seal_service = SessionEvidenceSealService()
 
     def create_experiment(self, config: RuntimeConfig, note: str = "") -> ExperimentRecord:
         self.reset_for_new_experiment()
@@ -72,6 +74,7 @@ class SessionService:
         safety_thresholds: dict[str, Any],
         device_health_snapshot: dict[str, Any],
         patient_registration: dict[str, Any] | None = None,
+        control_authority: dict[str, Any] | None = None,
     ) -> LockedSessionContext:
         if self.current_experiment is None:
             raise RuntimeError("experiment has not been created")
@@ -116,6 +119,7 @@ class SessionService:
             robot_profile=robot_profile or {},
             patient_registration=registration_payload,
             scan_protocol={},
+            control_authority=control_authority or {},
         )
         self.current_session_dir = Path(locked["session_dir"])
         self.current_scan_plan = ScanPlan.from_dict(locked["scan_plan"])
@@ -145,6 +149,7 @@ class SessionService:
             robot_profile=robot_profile,
             patient_registration=registration_payload,
             scan_protocol=scan_protocol,
+            control_authority=control_authority or {},
         )
         self.refresh_session_intelligence()
         return LockedSessionContext(
@@ -226,7 +231,13 @@ class SessionService:
             "contract_consistency": self.exp_manager.save_json_artifact(self.current_session_dir, "derived/session/contract_consistency.json", products["contract_consistency"]),
             "release_evidence_pack": self.exp_manager.save_json_artifact(self.current_session_dir, "export/release_evidence_pack.json", products["release_evidence_pack"]),
             "release_gate_decision": self.exp_manager.save_json_artifact(self.current_session_dir, "export/release_gate_decision.json", products["release_gate_decision"]),
+            "control_plane_snapshot": self.exp_manager.save_json_artifact(self.current_session_dir, "derived/session/control_plane_snapshot.json", products["control_plane_snapshot"]),
+            "control_authority_snapshot": self.exp_manager.save_json_artifact(self.current_session_dir, "derived/session/control_authority_snapshot.json", products["control_authority_snapshot"]),
+            "bridge_observability_report": self.exp_manager.save_json_artifact(self.current_session_dir, "derived/events/bridge_observability_report.json", products["bridge_observability_report"]),
+            "artifact_registry_snapshot": self.exp_manager.save_json_artifact(self.current_session_dir, "derived/session/artifact_registry_snapshot.json", products["artifact_registry_snapshot"]),
         }
+        seal_path = self.evidence_seal_service.write(self.current_session_dir, manifest=self.exp_manager.load_manifest(self.current_session_dir))
+        targets["session_evidence_seal"] = seal_path
         for name, path in targets.items():
             self.exp_manager.append_artifact(self.current_session_dir, name, path)
 

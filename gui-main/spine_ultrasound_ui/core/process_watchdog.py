@@ -2,7 +2,7 @@ import time
 import threading
 from typing import Dict, Callable, Any
 from PySide6.QtCore import QTimer, QObject, Signal
-from .event_bus import ebus
+from .qt_signal_bus import qt_bus as ebus
 
 class ProcessWatchdog(QObject):
     """

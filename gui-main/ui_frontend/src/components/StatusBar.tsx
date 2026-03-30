@@ -1,6 +1,6 @@
-import { useTelemetryStore } from '../store/telemetryStore';
-import { useSessionStore } from '../store/sessionStore';
-import { useUIStore } from '../store/uiStore';
+import { useTelemetryStore } from '../state/telemetryStore';
+import { useSessionStore } from '../state/sessionStore';
+import { useUIStore } from '../state/uiStore';
 import { Gauge, MonitorDot, Wifi, WifiOff } from 'lucide-react';
 
 export default function StatusBar() {
