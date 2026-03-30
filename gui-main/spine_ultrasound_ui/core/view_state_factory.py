@@ -28,6 +28,13 @@ class ViewStateFactory:
         bridge_observability: dict | None = None,
         control_plane_snapshot: dict | None = None,
     ) -> UiViewState:
+        resolved_control_plane_snapshot = self._resolve_control_plane_snapshot(
+            control_plane_snapshot=control_plane_snapshot,
+            backend_link=backend_link,
+            bridge_observability=bridge_observability,
+            model_report=model_report,
+            config_report=config_report,
+        )
         context = WorkflowContext(
             core_state=SystemState(telemetry.core_state.execution_state),
             has_experiment=workflow_artifacts.has_experiment,
@@ -37,7 +44,7 @@ class ViewStateFactory:
         )
         actions = self.workflow.permission_matrix(context)
         permissions = {name: bool(rule["enabled"]) for name, rule in actions.items()}
-        readiness = self._build_readiness(telemetry, workflow_artifacts, current_experiment, actions, control_plane_snapshot or {})
+        readiness = self._build_readiness(telemetry, workflow_artifacts, current_experiment, actions, resolved_control_plane_snapshot)
         sdk_alignment = self.sdk_service.build(config, telemetry.robot)
         return UiViewState(
             state=telemetry.core_state.execution_state,
@@ -78,6 +85,35 @@ class ViewStateFactory:
             backend_link=dict(backend_link or {}),
             bridge_observability=dict(bridge_observability or {}),
         )
+
+    @staticmethod
+    def _resolve_control_plane_snapshot(
+        *,
+        control_plane_snapshot: dict | None,
+        backend_link: dict | None,
+        bridge_observability: dict | None,
+        model_report: dict | None,
+        config_report: dict | None,
+    ) -> dict[str, Any]:
+        if control_plane_snapshot:
+            return dict(control_plane_snapshot)
+        backend_link = dict(backend_link or {})
+        bridge_observability = dict(bridge_observability or {})
+        model_report = dict(model_report or {})
+        config_report = dict(config_report or {})
+        if not any((backend_link, bridge_observability, model_report, config_report)):
+            return {}
+        control_plane = dict(backend_link.get("control_plane", {}))
+        return {
+            "summary_state": backend_link.get("summary_state", "unknown"),
+            "detail": backend_link.get("detail", "控制面状态未提供。"),
+            "protocol_version": dict(control_plane.get("protocol_status", {})),
+            "config_consistency": dict(control_plane.get("config_sync", {})),
+            "ownership_state": dict(control_plane.get("control_authority", {})),
+            "bridge_observability_state": bridge_observability,
+            "model_precheck": model_report,
+            "config_baseline": config_report,
+        }
 
     def _build_readiness(
         self,
