@@ -52,6 +52,13 @@ private:
   bool sessionFreezeConsistentLocked() const;
   std::string capabilityContractJsonLocked() const;
   std::string modelAuthorityContractJsonLocked() const;
+  std::string hardwareLifecycleContractJsonLocked() const;
+  std::string rtKernelContractJsonLocked() const;
+  std::string sessionDriftContractJsonLocked() const;
+  std::string controlGovernanceContractJsonLocked() const;
+  std::string controllerEvidenceJsonLocked() const;
+  std::string dualStateMachineContractJsonLocked() const;
+  std::string mainlineExecutorContractJsonLocked() const;
   std::string releaseContractJsonLocked() const;
   std::string deploymentContractJsonLocked() const;
   std::string faultInjectionContractJsonLocked() const;

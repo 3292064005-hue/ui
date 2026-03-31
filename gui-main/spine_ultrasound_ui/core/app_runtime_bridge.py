@@ -126,6 +126,7 @@ class AppRuntimeBridge:
         *,
         success_message: Optional[str] = None,
         fallback_to_safe_retreat: bool = False,
+        force_asset_refresh: bool = True,
     ) -> bool:
         reply = self.host._send_command(command, payload, workflow_step=command)
         if reply.ok:
@@ -138,7 +139,8 @@ class AppRuntimeBridge:
             )
             if success_message:
                 self.host._log("INFO", success_message)
-            self.refresh_sdk_assets(force=True)
+            if force_asset_refresh:
+                self.refresh_sdk_assets(force=True)
             self.host._emit_status()
             return True
         self.host.session_service.record_annotation(
@@ -158,7 +160,8 @@ class AppRuntimeBridge:
         )
         if fallback_to_safe_retreat:
             self.request_safe_retreat_after_failure(command)
-        self.refresh_sdk_assets(force=True)
+        if force_asset_refresh:
+            self.refresh_sdk_assets(force=True)
         self.host._emit_status()
         return False
 
@@ -257,4 +260,3 @@ class AppRuntimeBridge:
         self.host.workflow_artifacts.assessment = statuses["assessment"]
         self.host.session_service.refresh_session_intelligence()
         self.refresh_session_governance()
-

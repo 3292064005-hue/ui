@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from spine_ultrasound_ui.services.robot_identity_service import OfficialDhParameter, RobotIdentityService
+from spine_ultrasound_ui.utils.sdk_unit_contract import with_sdk_boundary_fields
 
 
 @dataclass
@@ -117,6 +118,12 @@ class XMateProfile:
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["dh_parameters"] = [item.to_dict() for item in self.dh_parameters]
+        payload = with_sdk_boundary_fields(
+            payload,
+            fc_frame_matrix=self.fc_frame_matrix,
+            tcp_frame_matrix=self.tcp_frame_matrix,
+            load_com_mm=self.load_com_mm,
+        )
         payload["sdk_mainline"] = {
             "robot_class": self.sdk_robot_class,
             "realtime_client_language": self.realtime_client_language,

@@ -187,7 +187,11 @@ class AppControllerRuntimeMixin:
         return self.runtime_bridge.run_guarded_command(command, payload, success_message=success_message, fallback_to_safe_retreat=fallback_to_safe_retreat)
 
     def _run_scan_start_step(self, command: str) -> bool:
-        return self.runtime_bridge.run_guarded_command(command, fallback_to_safe_retreat=True)
+        return self.runtime_bridge.run_guarded_command(
+            command,
+            fallback_to_safe_retreat=True,
+            force_asset_refresh=False,
+        )
 
     def _request_safe_retreat_after_failure(self, failed_command: str) -> None:
         self.runtime_bridge.request_safe_retreat_after_failure(failed_command)

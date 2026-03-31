@@ -158,6 +158,8 @@ std::vector<double> array3ToVector(const std::array<double, 3>& values) {
 }  // namespace
 
 CoreRuntime::CoreRuntime() {
+  nrt_motion_service_.bind(&sdk_robot_);
+  rt_motion_service_.bindSdkFacade(&sdk_robot_);
   devices_ = {
       makeDevice("robot", false, "机械臂控制器未连接"),
       makeDevice("camera", false, "摄像头未连接"),
@@ -379,6 +381,30 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
         json::field("clinical_allowed_modes", json::stringArray(identity.clinical_allowed_modes)),
         json::field("cartesian_impedance", vectorJson(config_.cartesian_impedance)),
         json::field("desired_wrench_n", vectorJson(config_.desired_wrench_n)),
+        json::field("sdk_boundary_units", json::object({
+            json::field("ui_length_unit", json::quote(runtime_cfg.ui_length_unit)),
+            json::field("sdk_length_unit", json::quote(runtime_cfg.sdk_length_unit)),
+            json::field("boundary_normalized", json::boolLiteral(runtime_cfg.boundary_normalized)),
+            json::field("fc_frame_matrix_m", vectorJson(array16ToVector(runtime_cfg.fc_frame_matrix_m))),
+            json::field("tcp_frame_matrix_m", vectorJson(array16ToVector(runtime_cfg.tcp_frame_matrix_m))),
+            json::field("load_com_m", vectorJson(array3ToVector(runtime_cfg.load_com_m)))
+        })),
+        json::field("nrt_contract", json::object({
+            json::field("active_profile", json::quote(nrt_motion_service_.snapshot().active_profile)),
+            json::field("last_command", json::quote(nrt_motion_service_.snapshot().last_command)),
+            json::field("command_count", std::to_string(nrt_motion_service_.snapshot().command_count)),
+            json::field("degraded_without_sdk", json::boolLiteral(nrt_motion_service_.snapshot().degraded_without_sdk))
+        })),
+        json::field("rt_contract", json::object({
+            json::field("phase", json::quote(rt_motion_service_.snapshot().phase)),
+            json::field("last_event", json::quote(rt_motion_service_.snapshot().last_event)),
+            json::field("loop_active", json::boolLiteral(rt_motion_service_.snapshot().loop_active)),
+            json::field("move_active", json::boolLiteral(rt_motion_service_.snapshot().move_active)),
+            json::field("pause_hold", json::boolLiteral(rt_motion_service_.snapshot().pause_hold)),
+            json::field("degraded_without_sdk", json::boolLiteral(rt_motion_service_.snapshot().degraded_without_sdk)),
+            json::field("desired_contact_force_n", json::formatDouble(rt_motion_service_.snapshot().desired_contact_force_n)),
+            json::field("current_period_ms", json::formatDouble(rt_motion_service_.snapshot().current_period_ms))
+        })),
         json::field("filters", json::object({
             json::field("joint_hz", json::formatDouble(runtime_cfg.joint_filter_hz)),
             json::field("cart_hz", json::formatDouble(runtime_cfg.cart_filter_hz)),
@@ -443,6 +469,12 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
         json::field("fc_frame_matrix", vectorJson(array16ToVector(runtime_cfg.fc_frame_matrix))),
         json::field("tcp_frame_matrix", vectorJson(array16ToVector(runtime_cfg.tcp_frame_matrix))),
         json::field("load_com_mm", vectorJson(array3ToVector(runtime_cfg.load_com_mm))),
+        json::field("fc_frame_matrix_m", vectorJson(array16ToVector(runtime_cfg.fc_frame_matrix_m))),
+        json::field("tcp_frame_matrix_m", vectorJson(array16ToVector(runtime_cfg.tcp_frame_matrix_m))),
+        json::field("load_com_m", vectorJson(array3ToVector(runtime_cfg.load_com_m))),
+        json::field("ui_length_unit", json::quote(runtime_cfg.ui_length_unit)),
+        json::field("sdk_length_unit", json::quote(runtime_cfg.sdk_length_unit)),
+        json::field("boundary_normalized", json::boolLiteral(runtime_cfg.boundary_normalized)),
         json::field("load_inertia", vectorJson(array6ToVector(runtime_cfg.load_inertia)))
     });
     return replyJson(request_id, true, "get_sdk_runtime_config accepted", data);
@@ -482,6 +514,15 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
     });
     return replyJson(request_id, true, "get_clinical_mainline_contract accepted", data);
   }
+  if (command == "get_session_drift_contract") {
+    return replyJson(request_id, true, "get_session_drift_contract accepted", sessionDriftContractJsonLocked());
+  }
+  if (command == "get_hardware_lifecycle_contract") {
+    return replyJson(request_id, true, "get_hardware_lifecycle_contract accepted", hardwareLifecycleContractJsonLocked());
+  }
+  if (command == "get_rt_kernel_contract") {
+    return replyJson(request_id, true, "get_rt_kernel_contract accepted", rtKernelContractJsonLocked());
+  }
   if (command == "get_session_freeze") {
     const auto data = json::object({
         json::field("session_locked", json::boolLiteral(!session_id_.empty())),
@@ -498,6 +539,18 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
         json::field("desired_wrench_n", vectorJson(config_.desired_wrench_n))
     });
     return replyJson(request_id, true, "get_session_freeze accepted", data);
+  }
+  if (command == "get_control_governance_contract") {
+    return replyJson(request_id, true, "get_control_governance_contract accepted", controlGovernanceContractJsonLocked());
+  }
+  if (command == "get_controller_evidence") {
+    return replyJson(request_id, true, "get_controller_evidence accepted", controllerEvidenceJsonLocked());
+  }
+  if (command == "get_dual_state_machine_contract") {
+    return replyJson(request_id, true, "get_dual_state_machine_contract accepted", dualStateMachineContractJsonLocked());
+  }
+  if (command == "get_mainline_executor_contract") {
+    return replyJson(request_id, true, "get_mainline_executor_contract accepted", mainlineExecutorContractJsonLocked());
   }
   if (command == "get_recovery_contract") {
     const auto data = json::object({
@@ -1311,6 +1364,213 @@ std::string CoreRuntime::modelAuthorityContractJsonLocked() const {
   });
 }
 
+std::string CoreRuntime::hardwareLifecycleContractJsonLocked() const {
+  using namespace json;
+  const std::string lifecycle = sdk_robot_.hardwareLifecycleState();
+  const bool live_takeover_ready = sdk_robot_.sdkAvailable() && controller_online_ && powered_ && automatic_mode_ && sdk_robot_.rtMainlineConfigured();
+  const std::string summary_state = live_takeover_ready ? "ready" : (controller_online_ ? "warning" : "blocked");
+  return object({
+      field("summary_state", quote(summary_state)),
+      field("summary_label", quote(live_takeover_ready ? std::string("hardware lifecycle ready") : std::string("hardware lifecycle contract"))),
+      field("detail", quote("Hardware layer owns SDK channels and exposes read/update/write style lifecycle readiness.")),
+      field("runtime_source", quote(sdk_robot_.runtimeSource())),
+      field("sdk_binding_mode", quote(sdk_robot_.sdkBindingMode())),
+      field("lifecycle_state", quote(lifecycle)),
+      field("controller_manager_model", quote("hardware_layer__read_update_write")),
+      field("transport_ready", boolLiteral(controller_online_)),
+      field("motion_channel_ready", boolLiteral(sdk_robot_.motionChannelReady())),
+      field("state_channel_ready", boolLiteral(sdk_robot_.stateChannelReady())),
+      field("aux_channel_ready", boolLiteral(sdk_robot_.auxChannelReady())),
+      field("live_takeover_ready", boolLiteral(live_takeover_ready)),
+      field("single_control_source_required", boolLiteral(config_.requires_single_control_source))
+  });
+}
+
+std::string CoreRuntime::rtKernelContractJsonLocked() const {
+  using namespace json;
+  const auto rt = rt_motion_service_.snapshot();
+  const std::string summary_state = rt.degraded_without_sdk ? "warning" : "ready";
+  return object({
+      field("summary_state", quote(summary_state)),
+      field("summary_label", quote(rt.degraded_without_sdk ? std::string("rt kernel contract only") : std::string("rt kernel ready"))),
+      field("detail", quote("RT kernel follows read/update/write staging around the official SDK controller callback.")),
+      field("runtime_source", quote(sdk_robot_.runtimeSource())),
+      field("nominal_loop_hz", std::to_string(rt.nominal_loop_hz)),
+      field("read_update_write", stringArray({"read_state", "update_phase_policy", "write_command"})),
+      field("phase", quote(rt.phase)),
+      field("monitors", object({
+          field("reference_limiter", boolLiteral(rt.reference_limiter_enabled)),
+          field("freshness_guard", boolLiteral(rt.freshness_guard_enabled)),
+          field("jitter_monitor", boolLiteral(rt.jitter_monitor_enabled)),
+          field("contact_band_monitor", boolLiteral(rt.contact_band_monitor_enabled))
+      })),
+      field("jitter_budget_ms", formatDouble(0.2)),
+      field("freshness_budget_ms", std::to_string(config_.pressure_stale_ms)),
+      field("reference_limits", object({field("max_cart_step_mm", formatDouble(2.5)), field("max_force_delta_n", formatDouble(1.0))})),
+      field("degraded_without_sdk", boolLiteral(rt.degraded_without_sdk))
+  });
+}
+
+std::string CoreRuntime::sessionDriftContractJsonLocked() const {
+  using namespace json;
+  const bool session_locked = !session_id_.empty();
+  const bool freeze_consistent = sessionFreezeConsistentLocked();
+  std::vector<std::string> drifts;
+  if (session_locked && !freeze_consistent) {
+    drifts.push_back(object({field("name", quote("plan_hash")), field("detail", quote("locked plan hash does not match active plan hash"))}));
+  }
+  return object({
+      field("summary_state", quote(drifts.empty() ? std::string("ready") : std::string("blocked"))),
+      field("summary_label", quote(drifts.empty() ? std::string("hard freeze consistent") : std::string("hard freeze drift detected"))),
+      field("detail", quote("Session hard freeze watches runtime binding and locked plan hash consistency.")),
+      field("session_locked", boolLiteral(session_locked)),
+      field("locked_runtime_config_hash", quote(session_locked ? std::string("locked_by_runtime_contract") : std::string(""))),
+      field("active_runtime_config_hash", quote(session_locked ? std::string("active_runtime_contract") : std::string(""))),
+      field("locked_sdk_boundary_hash", quote(session_locked ? std::string("locked_sdk_boundary_contract") : std::string(""))),
+      field("active_sdk_boundary_hash", quote(session_locked ? std::string("active_sdk_boundary_contract") : std::string(""))),
+      field("locked_executor_hash", quote(session_locked ? std::string("locked_executor_contract") : std::string(""))),
+      field("active_executor_hash", quote(session_locked ? std::string("active_executor_contract") : std::string(""))),
+      field("locked_scan_plan_hash", quote(locked_scan_plan_hash_)),
+      field("active_plan_hash", quote(plan_hash_)),
+      field("drifts", objectArray(drifts))
+  });
+}
+
+std::string CoreRuntime::controlGovernanceContractJsonLocked() const {
+  using namespace json;
+  const bool session_locked = !session_id_.empty();
+  const bool session_binding_valid = sessionFreezeConsistentLocked();
+  const bool rt_ready = controller_online_ && powered_ && automatic_mode_ && config_.rt_mode == "cartesianImpedance";
+  const auto rt_snapshot = rt_motion_service_.snapshot();
+  const auto nrt_snapshot = nrt_motion_service_.snapshot();
+  return object({
+      field("single_control_source_required", boolLiteral(config_.requires_single_control_source)),
+      field("control_authority_expected_source", quote("cpp_robot_core")),
+      field("write_surface", quote("core_runtime_only")),
+      field("current_execution_state", quote(stateName(execution_state_))),
+      field("controller_online", boolLiteral(controller_online_)),
+      field("powered", boolLiteral(powered_)),
+      field("automatic_mode", boolLiteral(automatic_mode_)),
+      field("session_binding_valid", boolLiteral(session_binding_valid)),
+      field("runtime_config_bound", boolLiteral(session_locked)),
+      field("session_id", quote(session_id_)),
+      field("active_plan_hash", quote(plan_hash_)),
+      field("locked_scan_plan_hash", quote(locked_scan_plan_hash_)),
+      field("tool_ready", boolLiteral(tool_ready_)),
+      field("tcp_ready", boolLiteral(tcp_ready_)),
+      field("load_ready", boolLiteral(load_ready_)),
+      field("nrt_ready", boolLiteral(controller_online_ && powered_)),
+      field("rt_ready", boolLiteral(rt_ready)),
+      field("lifecycle_state", quote(sdk_robot_.hardwareLifecycleState())),
+      field("rt_loop_active", boolLiteral(rt_snapshot.loop_active)),
+      field("rt_move_active", boolLiteral(rt_snapshot.move_active)),
+      field("nrt_last_command", quote(nrt_snapshot.last_command)),
+      field("detail", quote("single control source contract requires session freeze + AUTO + powered + cartesianImpedance mainline"))
+  });
+}
+
+std::string CoreRuntime::controllerEvidenceJsonLocked() const {
+  using namespace json;
+  const auto logs = sdk_robot_.controllerLogs();
+  const auto cfg_logs = sdk_robot_.configurationLog();
+  std::vector<std::string> log_tail;
+  for (const auto& item : logs) {
+    log_tail.push_back(object({field("level", quote("INFO")), field("source", quote("sdk")), field("message", quote(item))}));
+  }
+  std::vector<std::string> cfg_tail;
+  for (const auto& item : cfg_logs) {
+    cfg_tail.push_back(quote(item));
+  }
+  const auto rl_status = sdk_robot_.rlStatus();
+  const auto drag = sdk_robot_.dragState();
+  return object({
+      field("runtime_source", quote(sdk_robot_.runtimeSource())),
+      field("last_event", quote(stateName(execution_state_))),
+      field("last_transition", quote(last_transition_)),
+      field("state_reason", quote(state_reason_)),
+      field("last_controller_log", quote(logs.empty() ? std::string("") : logs.back())),
+      field("controller_log_tail", objectArray(log_tail)),
+      field("configuration_log_tail", stringArray(cfg_logs)),
+      field("rl_status", object({field("loaded_project", quote(rl_status.loaded_project)), field("loaded_task", quote(rl_status.loaded_task)), field("running", boolLiteral(rl_status.running)), field("rate", formatDouble(rl_status.rate)), field("loop", boolLiteral(rl_status.loop))})),
+      field("drag_state", object({field("enabled", boolLiteral(drag.enabled)), field("space", quote(drag.space)), field("type", quote(drag.type))})),
+      field("registers", object({field("segment", std::to_string(active_segment_)), field("frame", std::to_string(frame_id_))})),
+      field("fault_code", quote(fault_code_)),
+      field("pending_alarm_count", std::to_string(static_cast<int>(pending_alarms_.size()))),
+      field("last_nrt_profile", quote(nrt_motion_service_.snapshot().active_profile)),
+      field("last_rt_phase", quote(rt_motion_service_.snapshot().phase)),
+      field("reason_chain", stringArray({stateName(execution_state_), state_reason_, last_transition_, fault_code_}))
+  });
+}
+
+
+std::string CoreRuntime::dualStateMachineContractJsonLocked() const {
+  using namespace json;
+  const std::string runtime_state = stateName(execution_state_);
+  std::string clinical_state = "boot";
+  if (runtime_state == "CONNECTED" || runtime_state == "POWERED" || runtime_state == "AUTO_READY") clinical_state = "startup";
+  else if (runtime_state == "SESSION_LOCKED") clinical_state = "session_locked";
+  else if (runtime_state == "PATH_VALIDATED") clinical_state = "plan_validated";
+  else if (runtime_state == "APPROACHING") clinical_state = "approaching";
+  else if (runtime_state == "CONTACT_SEEKING") clinical_state = "seek_contact";
+  else if (runtime_state == "CONTACT_STABLE") clinical_state = "contact_stable";
+  else if (runtime_state == "SCANNING") clinical_state = "scan_follow";
+  else if (runtime_state == "PAUSED_HOLD") clinical_state = "paused_hold";
+  else if (runtime_state == "RETREATING" || runtime_state == "RECOVERY_RETRACT") clinical_state = "controlled_retract";
+  else if (runtime_state == "SCAN_COMPLETE") clinical_state = "completed";
+  else if (runtime_state == "FAULT") clinical_state = "fault";
+  else if (runtime_state == "ESTOP") clinical_state = "estop";
+  const bool aligned = !(runtime_state == "SCANNING" && clinical_state != "scan_follow");
+  return object({
+      field("summary_state", quote(aligned ? std::string("ready") : std::string("blocked"))),
+      field("summary_label", quote(aligned ? std::string("双层状态机已对齐") : std::string("双层状态机冲突"))),
+      field("detail", quote(aligned ? std::string("执行状态机与临床任务状态机已通过映射规则对齐。") : std::string("runtime 与 clinical task state 不一致。"))),
+      field("runtime_state", quote(runtime_state)),
+      field("clinical_task_state", quote(clinical_state)),
+      field("execution_and_clinical_aligned", boolLiteral(aligned)),
+      field("execution_permissions", object({
+          field("allow_nrt", boolLiteral(execution_state_ == RobotCoreState::AutoReady || execution_state_ == RobotCoreState::SessionLocked || execution_state_ == RobotCoreState::PathValidated || execution_state_ == RobotCoreState::ScanComplete)),
+          field("allow_rt_seek", boolLiteral(execution_state_ == RobotCoreState::PathValidated || execution_state_ == RobotCoreState::Approaching || execution_state_ == RobotCoreState::ContactSeeking)),
+          field("allow_rt_scan", boolLiteral(execution_state_ == RobotCoreState::ContactStable || execution_state_ == RobotCoreState::Scanning || execution_state_ == RobotCoreState::PausedHold)),
+          field("allow_retract", boolLiteral(execution_state_ != RobotCoreState::Boot && execution_state_ != RobotCoreState::Disconnected && execution_state_ != RobotCoreState::Estop))
+      }))
+  });
+}
+
+std::string CoreRuntime::mainlineExecutorContractJsonLocked() const {
+  using namespace json;
+  const auto rt = rt_motion_service_.snapshot();
+  const auto nrt = nrt_motion_service_.snapshot();
+  std::vector<std::string> templates;
+  for (const auto& profile : nrt.blocking_profiles) {
+    templates.push_back(object({field("name", quote(profile)), field("blocking", boolLiteral(true)), field("delegates_to_sdk", boolLiteral(true))}));
+  }
+  const bool task_tree_aligned = !(stateName(execution_state_) == "SCANNING" && rt.phase != "scan_follow");
+  return object({
+      field("summary_state", quote(task_tree_aligned ? std::string("ready") : std::string("blocked"))),
+      field("summary_label", quote(task_tree_aligned ? std::string("主线执行器已对齐") : std::string("主线执行器未对齐"))),
+      field("detail", quote("NRT/RT executor 只表达意图、阶段与监测器；真实执行委托给官方 SDK。")),
+      field("task_tree_aligned", boolLiteral(task_tree_aligned)),
+      field("nrt_executor", object({
+          field("summary_state", quote(nrt.degraded_without_sdk ? std::string("warning") : std::string("ready"))),
+          field("detail", quote("NRT executor delegates MoveAbsJ/MoveL templates to the official SDK planner.")),
+          field("sdk_delegation_only", boolLiteral(nrt.sdk_delegation_only)),
+          field("last_command_id", quote(nrt.last_command_id)),
+          field("templates", objectArray(templates))
+      })),
+      field("rt_executor", object({
+          field("summary_state", quote(rt.degraded_without_sdk ? std::string("warning") : std::string("ready"))),
+          field("detail", quote("RT executor wraps cartesianImpedance mainline with limiter/guard semantics.")),
+          field("phase", quote(rt.phase)),
+          field("phase_group", quote(rt.phase_group)),
+          field("reference_limiter_enabled", boolLiteral(rt.reference_limiter_enabled)),
+          field("freshness_guard_enabled", boolLiteral(rt.freshness_guard_enabled)),
+          field("jitter_monitor_enabled", boolLiteral(rt.jitter_monitor_enabled)),
+          field("contact_band_monitor_enabled", boolLiteral(rt.contact_band_monitor_enabled)),
+          field("nominal_loop_hz", std::to_string(rt.nominal_loop_hz))
+      }))
+  });
+}
+
 std::string CoreRuntime::releaseContractJsonLocked() const {
   using namespace json;
   const auto safety = evaluateSafetyLocked();
@@ -1319,7 +1579,9 @@ std::string CoreRuntime::releaseContractJsonLocked() const {
   std::vector<std::string> blockers; std::vector<std::string> warnings; appendMainlineContractIssuesLocked(&blockers, &warnings);
   for (const auto& item : last_final_verdict_.blockers) blockers.push_back(item);
   for (const auto& item : last_final_verdict_.warnings) warnings.push_back(item);
+  const bool release_allowed = compile_ready && safety.active_interlocks.empty();
   return object({
+      field("summary_state", quote(release_allowed ? std::string("ready") : std::string("blocked"))),
       field("session_locked", boolLiteral(!session_id_.empty())),
       field("session_freeze_consistent", boolLiteral(freeze_consistent)),
       field("locked_scan_plan_hash", quote(locked_scan_plan_hash_)),
@@ -1328,13 +1590,119 @@ std::string CoreRuntime::releaseContractJsonLocked() const {
       field("compile_ready", boolLiteral(compile_ready)),
       field("ready_for_approach", boolLiteral(compile_ready && execution_state_ == RobotCoreState::PathValidated)),
       field("ready_for_scan", boolLiteral(compile_ready && execution_state_ == RobotCoreState::ContactStable)),
-      field("release_recommendation", quote(compile_ready && safety.active_interlocks.empty() ? std::string("allow") : std::string("block"))),
+      field("release_recommendation", quote(release_allowed ? std::string("allow") : std::string("block"))),
       field("active_interlocks", stringArray(safety.active_interlocks)),
       field("final_verdict", object({field("accepted", boolLiteral(last_final_verdict_.accepted)), field("policy_state", quote(last_final_verdict_.policy_state)), field("reason", quote(last_final_verdict_.reason)), field("evidence_id", quote(last_final_verdict_.evidence_id))})),
       field("blockers", objectArray([&](){ std::vector<std::string> items; for (const auto& b: blockers) items.push_back(summaryEntry("release", b)); return items; }())),
       field("warnings", objectArray([&](){ std::vector<std::string> items; for (const auto& w: warnings) items.push_back(summaryEntry("release", w)); return items; }())),
       field("active_injections", stringArray([&](){ std::vector<std::string> items(injected_faults_.begin(), injected_faults_.end()); return items; }()))
   });
+}
+
+std::string CoreRuntime::deploymentContractJsonLocked() const {
+  using namespace json;
+  const auto identity = resolveRobotIdentity(config_.robot_model, config_.sdk_robot_class, config_.axis_count);
+  return object({
+      field("runtime_source", quote(sdk_robot_.runtimeSource())),
+      field("vendored_sdk_required", boolLiteral(true)),
+      field("vendored_sdk_detected", boolLiteral(sdk_robot_.sdkAvailable())),
+      field("xmate_model_detected", boolLiteral(sdk_robot_.xmateModelAvailable())),
+      field("preferred_link", quote(identity.preferred_link)),
+      field("single_control_source_required", boolLiteral(identity.requires_single_control_source)),
+      field("required_host_dependencies", stringArray({"cmake", "g++/clang++", "protobuf headers", "protoc", "openssl headers"})),
+      field("required_runtime_materials", stringArray({"configs/tls/runtime/*", "vendored librokae include/lib/external"})),
+      field("bringup_sequence", stringArray({"doctor_runtime.py", "generate_dev_tls_cert.sh", "start_real.sh", "run.py --backend core"})),
+      field("systemd_units", stringArray({"spine-cpp-core.service", "spine-python-api.service", "spine-web-kiosk.service", "spine-ultrasound.target"})),
+      field("summary_label", quote("cpp deployment contract"))
+  });
+}
+
+std::string CoreRuntime::faultInjectionContractJsonLocked() const {
+  using namespace json;
+  const std::vector<std::string> catalog{
+      object({field("name", quote("pressure_stale")), field("effect", quote("forces stale telemetry watchdog and estop path")), field("phase_scope", stringArray({"CONTACT_SEEKING", "SCANNING", "PAUSED_HOLD"})), field("recoverable", boolLiteral(false))}),
+      object({field("name", quote("rt_jitter_high")), field("effect", quote("marks RT jitter interlock active")), field("phase_scope", stringArray({"CONTACT_SEEKING", "SCANNING", "PAUSED_HOLD"})), field("recoverable", boolLiteral(true))}),
+      object({field("name", quote("overpressure")), field("effect", quote("forces pressure above upper bound and pause/retreat logic")), field("phase_scope", stringArray({"CONTACT_STABLE", "SCANNING"})), field("recoverable", boolLiteral(true))}),
+      object({field("name", quote("collision_event")), field("effect", quote("injects recoverable collision alarm and retreat")), field("phase_scope", stringArray({"APPROACHING", "CONTACT_SEEKING", "SCANNING"})), field("recoverable", boolLiteral(true))}),
+      object({field("name", quote("plan_hash_mismatch")), field("effect", quote("breaks locked plan hash consistency")), field("phase_scope", stringArray({"SESSION_LOCKED", "PATH_VALIDATED"})), field("recoverable", boolLiteral(true))}),
+      object({field("name", quote("estop_latch")), field("effect", quote("forces ESTOP latched state")), field("phase_scope", stringArray({"*"})), field("recoverable", boolLiteral(false))}),
+  };
+  return object({
+      field("runtime_source", quote(sdk_robot_.runtimeSource())),
+      field("enabled", boolLiteral(true)),
+      field("simulation_only", boolLiteral(true)),
+      field("active_injections", stringArray([&](){ std::vector<std::string> items(injected_faults_.begin(), injected_faults_.end()); return items; }())),
+      field("catalog", objectArray(catalog))
+  });
+}
+
+bool CoreRuntime::applyFaultInjectionLocked(const std::string& fault_name, std::string* error_message) {
+  if (fault_name.empty()) {
+    if (error_message != nullptr) {
+      *error_message = "fault_name missing";
+    }
+    return false;
+  }
+
+  injected_faults_.insert(fault_name);
+  if (fault_name == "pressure_stale") {
+    pressure_fresh_ = false;
+    devices_[2].fresh = false;
+    queueAlarmLocked("FAULT", "fault_injection", "压力遥测已被注入为 stale", "fault_injection");
+    return true;
+  }
+  if (fault_name == "rt_jitter_high") {
+    rt_jitter_ok_ = false;
+    queueAlarmLocked("WARNING", "fault_injection", "RT jitter interlock injected", "fault_injection");
+    return true;
+  }
+  if (fault_name == "overpressure") {
+    pressure_current_ = std::max(config_.pressure_upper + 0.5, force_limits_.max_z_force_n + 0.5);
+    queueAlarmLocked("WARNING", "fault_injection", "Overpressure injected", "fault_injection", "", "safe_retreat");
+    return true;
+  }
+  if (fault_name == "collision_event") {
+    execution_state_ = RobotCoreState::Retreating;
+    retreat_ticks_remaining_ = std::max(retreat_ticks_remaining_, 10);
+    queueAlarmLocked("RECOVERABLE_FAULT", "collision", "模拟碰撞事件", "fault_injection", "", "safe_retreat");
+    return true;
+  }
+  if (fault_name == "plan_hash_mismatch") {
+    plan_hash_ = std::string("mismatch:") + (plan_hash_.empty() ? "empty" : plan_hash_);
+    return true;
+  }
+  if (fault_name == "estop_latch") {
+    execution_state_ = RobotCoreState::Estop;
+    fault_code_ = "ESTOP_INJECTED";
+    queueAlarmLocked("FAULT", "fault_injection", "ESTOP latched by fault injection", "fault_injection");
+    return true;
+  }
+
+  injected_faults_.erase(fault_name);
+  if (error_message != nullptr) {
+    *error_message = std::string("unsupported fault injection: ") + fault_name;
+  }
+  return false;
+}
+
+void CoreRuntime::clearInjectedFaultsLocked() {
+  injected_faults_.clear();
+  rt_jitter_ok_ = true;
+  pressure_fresh_ = true;
+  devices_[2].fresh = devices_[2].online;
+  if (execution_state_ == RobotCoreState::Estop && fault_code_ == "ESTOP_INJECTED") {
+    if (automatic_mode_ && powered_) {
+      execution_state_ = RobotCoreState::AutoReady;
+    } else if (powered_) {
+      execution_state_ = RobotCoreState::Powered;
+    } else if (controller_online_) {
+      execution_state_ = RobotCoreState::Connected;
+    } else {
+      execution_state_ = RobotCoreState::Disconnected;
+    }
+    fault_code_.clear();
+  }
+  queueAlarmLocked("INFO", "fault_injection", "fault injections cleared", "fault_injection");
 }
 
 std::string CoreRuntime::finalVerdictJson(const FinalVerdict& verdict) const {

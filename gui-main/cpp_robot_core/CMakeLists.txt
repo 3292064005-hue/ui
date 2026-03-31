@@ -91,7 +91,7 @@ add_executable(test_protocol_bridge src/test_protocol_bridge.cpp)
 add_executable(test_recovery_manager src/test_recovery_manager.cpp)
 add_executable(impedance_scan_example src/impedance_scan_example.cpp)
 
-target_link_libraries(spine_robot_core_runtime
+target_link_libraries(spine_robot_core_runtime PRIVATE
     Threads::Threads
     protobuf::libprotobuf
     OpenSSL::SSL

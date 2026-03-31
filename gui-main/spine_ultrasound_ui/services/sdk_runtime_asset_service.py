@@ -4,9 +4,12 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from spine_ultrasound_ui.models import RuntimeConfig
+from spine_ultrasound_ui.utils.sdk_unit_contract import build_sdk_boundary_contract
 from spine_ultrasound_ui.services.backend_base import BackendBase
 from spine_ultrasound_ui.services.ipc_protocol import ReplyEnvelope
 from spine_ultrasound_ui.services.sdk_environment_doctor_service import SdkEnvironmentDoctorService
+from spine_ultrasound_ui.services.mainline_runtime_doctor_service import MainlineRuntimeDoctorService
+from spine_ultrasound_ui.services.mainline_task_tree_service import MainlineTaskTreeService
 
 
 @dataclass
@@ -29,6 +32,15 @@ class SdkRuntimeAssetSnapshot:
     capability_contract: dict[str, Any] = field(default_factory=dict)
     model_authority_contract: dict[str, Any] = field(default_factory=dict)
     session_freeze: dict[str, Any] = field(default_factory=dict)
+    session_drift_contract: dict[str, Any] = field(default_factory=dict)
+    hardware_lifecycle_contract: dict[str, Any] = field(default_factory=dict)
+    rt_kernel_contract: dict[str, Any] = field(default_factory=dict)
+    control_governance_contract: dict[str, Any] = field(default_factory=dict)
+    controller_evidence: dict[str, Any] = field(default_factory=dict)
+    mainline_runtime_doctor: dict[str, Any] = field(default_factory=dict)
+    dual_state_machine_contract: dict[str, Any] = field(default_factory=dict)
+    mainline_executor_contract: dict[str, Any] = field(default_factory=dict)
+    mainline_task_tree: dict[str, Any] = field(default_factory=dict)
     recovery_contract: dict[str, Any] = field(default_factory=dict)
     release_contract: dict[str, Any] = field(default_factory=dict)
     deployment_contract: dict[str, Any] = field(default_factory=dict)
@@ -55,6 +67,15 @@ class SdkRuntimeAssetSnapshot:
             "capability_contract": dict(self.capability_contract),
             "model_authority_contract": dict(self.model_authority_contract),
             "session_freeze": dict(self.session_freeze),
+            "session_drift_contract": dict(self.session_drift_contract),
+            "hardware_lifecycle_contract": dict(self.hardware_lifecycle_contract),
+            "rt_kernel_contract": dict(self.rt_kernel_contract),
+            "control_governance_contract": dict(self.control_governance_contract),
+            "controller_evidence": dict(self.controller_evidence),
+            "mainline_runtime_doctor": dict(self.mainline_runtime_doctor),
+            "dual_state_machine_contract": dict(self.dual_state_machine_contract),
+            "mainline_executor_contract": dict(self.mainline_executor_contract),
+            "mainline_task_tree": dict(self.mainline_task_tree),
             "recovery_contract": dict(self.recovery_contract),
             "release_contract": dict(self.release_contract),
             "deployment_contract": dict(self.deployment_contract),
@@ -75,6 +96,8 @@ class SdkRuntimeAssetService:
     def __init__(self) -> None:
         self.snapshot = SdkRuntimeAssetSnapshot()
         self.doctor = SdkEnvironmentDoctorService()
+        self.mainline_doctor = MainlineRuntimeDoctorService()
+        self.task_tree = MainlineTaskTreeService()
 
     def refresh(self, backend: BackendBase, config: RuntimeConfig) -> dict[str, Any]:
         self.snapshot = SdkRuntimeAssetSnapshot()
@@ -91,6 +114,7 @@ class SdkRuntimeAssetService:
         motion_contract.setdefault("rt_mode", config.rt_mode)
         motion_contract.setdefault("preferred_link", config.preferred_link)
         motion_contract.setdefault("network_tolerance_percent", config.rt_network_tolerance_percent)
+        motion_contract.setdefault("sdk_boundary_units", build_sdk_boundary_contract(fc_frame_matrix=config.fc_frame_matrix, tcp_frame_matrix=config.tcp_frame_matrix, load_com_mm=config.load_com_mm))
         self.snapshot.motion_contract = motion_contract
         self.snapshot.register_snapshot = dict(self._query_data(backend, "get_register_snapshot", {}, default={}))
         self.snapshot.runtime_alignment = dict(self._query_data(backend, "get_runtime_alignment", {}, default={}))
@@ -102,10 +126,32 @@ class SdkRuntimeAssetService:
         self.snapshot.capability_contract = dict(self._query_data(backend, "get_capability_contract", {}, default={}))
         self.snapshot.model_authority_contract = dict(self._query_data(backend, "get_model_authority_contract", {}, default={}))
         self.snapshot.session_freeze = dict(self._query_data(backend, "get_session_freeze", {}, default={}))
+        self.snapshot.session_drift_contract = dict(self._query_data(backend, "get_session_drift_contract", {}, default={}))
+        self.snapshot.hardware_lifecycle_contract = dict(self._query_data(backend, "get_hardware_lifecycle_contract", {}, default={}))
+        self.snapshot.rt_kernel_contract = dict(self._query_data(backend, "get_rt_kernel_contract", {}, default={}))
+        self.snapshot.control_governance_contract = dict(self._query_data(backend, "get_control_governance_contract", {}, default={}))
+        self.snapshot.controller_evidence = dict(self._query_data(backend, "get_controller_evidence", {}, default={}))
+        self.snapshot.dual_state_machine_contract = dict(self._query_data(backend, "get_dual_state_machine_contract", {}, default={}))
+        self.snapshot.mainline_executor_contract = dict(self._query_data(backend, "get_mainline_executor_contract", {}, default={}))
         self.snapshot.recovery_contract = dict(self._query_data(backend, "get_recovery_contract", {}, default={}))
         self.snapshot.release_contract = dict(self._query_data(backend, "get_release_contract", {}, default={}))
         self.snapshot.deployment_contract = dict(self._query_data(backend, "get_deployment_contract", {}, default={}))
         self.snapshot.fault_injection_contract = dict(self._query_data(backend, "get_fault_injection_contract", {}, default={}))
+        backend_link = backend.link_snapshot() if hasattr(backend, "link_snapshot") else {}
+        self.snapshot.mainline_task_tree = dict(self.task_tree.build(
+            config=config,
+            sdk_runtime=self.snapshot.to_dict(),
+            backend_link=backend_link,
+            model_report={},
+            session_governance={},
+        ))
+        self.snapshot.mainline_runtime_doctor = dict(self.mainline_doctor.inspect(
+            config=config,
+            sdk_runtime=self.snapshot.to_dict(),
+            backend_link=backend_link,
+            model_report={},
+            session_governance={},
+        ))
         return self.snapshot.to_dict()
 
     def _query_list(self, backend: BackendBase, command: str, payload: dict[str, Any], key: str) -> list[dict[str, Any]]:

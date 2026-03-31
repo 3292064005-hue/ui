@@ -12,7 +12,7 @@ from spine_ultrasound_ui.utils import ensure_dir, generate_demo_pixmap
 
 from .backend_base import BackendBase
 from .backend_control_plane_service import BackendControlPlaneService
-from .ipc_protocol import ReplyEnvelope, TelemetryEnvelope
+from .ipc_protocol import ReplyEnvelope, TelemetryEnvelope, is_write_command
 from .mock_core_runtime import MockCoreRuntime
 from .scan_plan_contract import runtime_scan_plan_payload
 
@@ -53,7 +53,11 @@ class MockBackend(QObject, BackendBase):
         self._recent_commands.append({"command": command, "ok": bool(reply.ok), "message": str(reply.message)})
         self._recent_commands = self._recent_commands[-12:]
         self.log_generated.emit("INFO" if reply.ok else "ERROR", f"[mock_core] {command}: {reply.message}")
-        self._emit_telemetry(self.runtime.telemetry_snapshot())
+        # Avoid recursive governance refresh loops during read-only asset aggregation.
+        # Write commands still publish fresh telemetry immediately; read commands rely on
+        # the periodic tick or explicit runtime polling.
+        if is_write_command(command):
+            self._emit_telemetry(self.runtime.telemetry_snapshot())
         return reply
 
     def link_snapshot(self) -> dict:

@@ -6,4 +6,6 @@ try:
 except Exception:  # pragma: no cover - PySide6 may be unavailable during headless tests
     generate_demo_pixmap = None
 
-__all__ = ["ensure_dir", "now_text", "now_ns", "generate_demo_pixmap"]
+__all__ = ["ensure_dir", "now_text", "now_ns", "generate_demo_pixmap", "payload_hash", "short_hash"]
+
+from .runtime_fingerprint import payload_hash, short_hash

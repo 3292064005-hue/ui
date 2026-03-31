@@ -33,6 +33,16 @@ class GovernanceCoordinator:
         session_governance = self.session_governance_service.build(current_session_dir)
         sdk_alignment = self.sdk_service.build(config, telemetry.robot)
         deployment_profile = self.deployment_profile_service.build_snapshot(config)
+        runtime_doctor = dict(sdk_runtime.get("mainline_runtime_doctor", {}))
+        if runtime_doctor:
+            runtime_doctor = self.runtime_service.mainline_doctor.inspect(
+                config=config,
+                sdk_runtime=sdk_runtime,
+                backend_link=backend_link,
+                model_report=model_report,
+                session_governance=session_governance,
+            )
+            sdk_runtime = {**sdk_runtime, "mainline_runtime_doctor": dict(runtime_doctor)}
         control_plane_snapshot = self.control_plane_snapshot_service.build(
             backend_link=backend_link,
             control_authority=backend_link.get("control_plane", {}).get("control_authority", {}),
@@ -44,14 +54,21 @@ class GovernanceCoordinator:
             session_governance=session_governance,
             evidence_seal=session_governance.get("evidence_seal", {}),
             release_mode=deployment_profile.get("name", "dev"),
+            runtime_doctor=runtime_doctor,
         )
         return {"sdk_runtime": sdk_runtime, "config_report": config_report, "model_report": model_report, "backend_link": backend_link, "bridge_observability": bridge_observability, "session_governance": session_governance, "sdk_alignment": sdk_alignment, "deployment_profile": deployment_profile, "control_plane_snapshot": control_plane_snapshot}
 
     @staticmethod
     def collect_startup_blockers(*, config_report: dict[str, Any], model_report: dict[str, Any], sdk_alignment: dict[str, Any], backend_link: dict[str, Any], bridge_observability: dict[str, Any], control_plane_snapshot: dict[str, Any]) -> list[dict[str, str]]:
         blockers: list[dict[str, str]] = []
+        backend_mode = str(backend_link.get("mode", ""))
         for item in control_plane_snapshot.get("blockers", []) or []:
             payload = dict(item)
             payload.setdefault("section", "control_plane")
+            section = str(payload.get("section", ""))
+            name = str(payload.get("name", ""))
+            if backend_mode == "mock" and section in {"environment", "runtime_doctor"}:
+                if section != "runtime_doctor" or name in {"sdk_environment_blocked", "运行主线治理阻塞"}:
+                    continue
             blockers.append(payload)
         return blockers

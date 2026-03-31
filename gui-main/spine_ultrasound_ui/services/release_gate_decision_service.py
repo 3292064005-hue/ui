@@ -41,6 +41,7 @@ class ReleaseGateDecisionService:
             'derived/session/control_plane_snapshot.json',
         ]
 
+        runtime_doctor = dict(control_plane_snapshot.get('runtime_doctor', {}))
         check_results = [
             self._check('contract_alignment', bool(contract.get('summary', {}).get('consistent', False)), blocking_reason='contract_alignment_failed', remediation='repair_contract_consistency', evidence=['derived/session/contract_consistency.json']),
             self._check('artifact_integrity', bool(integrity.get('summary', {}).get('integrity_ok', False)), blocking_reason='artifact_integrity_failed', remediation='repair_session_integrity', evidence=['export/session_integrity.json']),
@@ -52,6 +53,8 @@ class ReleaseGateDecisionService:
             self._check('contract_kernel_diff', bool(contract_kernel_diff.get('summary', {}).get('consistent', False)), blocking_reason='contract_kernel_diff_failed', remediation='repair_contract_kernel_alignment', evidence=['derived/session/contract_kernel_diff.json']),
             self._check('session_evidence_seal', bool(evidence_seal.get('seal_digest', '')), blocking_reason='session_evidence_seal_missing' if seal_required else '', warning_reason='' if seal_required else 'session_evidence_seal_missing', remediation='materialize_session_evidence_seal', evidence=['meta/session_evidence_seal.json']),
             self._check('control_plane_snapshot', bool(control_plane_snapshot.get('summary_state')), warning_reason='control_plane_snapshot_missing', remediation='materialize_control_plane_snapshot', evidence=['derived/session/control_plane_snapshot.json']),
+            self._check('runtime_doctor', str(runtime_doctor.get('summary_state', 'ready')) != 'blocked', blocking_reason='runtime_doctor_blocked', remediation='repair_runtime_doctor_alignment', evidence=['derived/session/control_plane_snapshot.json']),
+            self._check('hard_freeze', str(dict(control_plane_snapshot.get('runtime_doctor', {})).get('session_freeze_drift_count', 0)) in {'0', '0.0'} or int(dict(control_plane_snapshot.get('runtime_doctor', {})).get('session_freeze_drift_count', 0) or 0) == 0, blocking_reason='hard_freeze_drift_detected', remediation='relock_session_with_current_runtime_profile', evidence=['derived/session/control_plane_snapshot.json']),
         ]
 
         blocking_reasons = [item['blocking_reason'] for item in check_results if item['status'] == 'failed' and item.get('blocking_reason')]

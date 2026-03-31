@@ -17,6 +17,7 @@ class ControlPlaneSnapshotService:
         session_governance: dict[str, Any] | None = None,
         evidence_seal: dict[str, Any] | None = None,
         release_mode: str | None = None,
+        runtime_doctor: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         backend_link = dict(backend_link or {})
         bridge_observability = dict(bridge_observability or {})
@@ -26,6 +27,7 @@ class ControlPlaneSnapshotService:
         deployment_profile = dict(deployment_profile or {})
         session_governance = dict(session_governance or {})
         evidence_seal = dict(evidence_seal or {})
+        runtime_doctor = dict(runtime_doctor or {})
         backend_control_plane = dict(backend_link.get("control_plane", {}))
         control_authority = dict(control_authority or backend_control_plane.get("control_authority", {}))
 
@@ -49,6 +51,7 @@ class ControlPlaneSnapshotService:
             ("model", model_report),
             ("session_governance", session_governance),
             ("evidence_seal", evidence_seal),
+            ("runtime_doctor", runtime_doctor),
         ):
             _push("blockers", name, summary)
             _push("warnings", name, summary)
@@ -107,9 +110,11 @@ class ControlPlaneSnapshotService:
             "bridge_observability_state": bridge_observability,
             "evidence_seal_state": evidence_seal_state,
             "release_mode": {"name": resolved_release_mode},
+            "runtime_doctor": dict(runtime_doctor),
             "sdk_alignment": sdk_alignment,
             "model_precheck": model_report,
             "config_baseline": config_report,
+            "runtime_doctor": runtime_doctor,
         }
 
         for section_name, summary in canonical_sections.items():
@@ -182,6 +187,7 @@ class ControlPlaneSnapshotService:
             "bridge_observability_state": dict(bridge_observability),
             "evidence_seal_state": evidence_seal_state,
             "release_mode": {"name": resolved_release_mode},
+            "runtime_doctor": dict(runtime_doctor),
             "sections": {
                 "backend_link": {"summary_state": backend_link.get("summary_state", "unknown"), "summary_label": backend_link.get("summary_label", "backend link")},
                 "control_authority": {"summary_state": control_authority.get("summary_state", "unknown"), "summary_label": control_authority.get("summary_label", "control authority")},
@@ -190,5 +196,6 @@ class ControlPlaneSnapshotService:
                 "sdk_alignment": {"summary_state": sdk_alignment.get("summary_state", "unknown"), "summary_label": sdk_alignment.get("summary_label", "sdk alignment")},
                 "model": {"summary_state": model_report.get("summary_state", "unknown"), "summary_label": model_report.get("summary_label", "model precheck")},
                 "deployment_profile": dict(deployment_profile),
+                "runtime_doctor": {"summary_state": runtime_doctor.get("summary_state", "unknown"), "summary_label": runtime_doctor.get("summary_label", "runtime doctor")},
             },
         }

@@ -234,7 +234,7 @@ inline std::vector<double> extractDoubleArray(const std::string& json_line, cons
     return fallback;
   }
   std::vector<double> values;
-  const std::regex re("-?[0-9]+(?:\.[0-9]+)?");
+  const std::regex re(R"(-?[0-9]+(?:\.[0-9]+)?)");
   auto begin = std::sregex_iterator(array_json.begin(), array_json.end(), re);
   auto end = std::sregex_iterator();
   for (auto it = begin; it != end; ++it) {
@@ -249,7 +249,7 @@ inline std::vector<std::string> extractStringArray(const std::string& json_line,
     return fallback;
   }
   std::vector<std::string> values;
-  const std::regex re(""([^"]*)"");
+  const std::regex re(R"json("([^"]*)")json");
   auto begin = std::sregex_iterator(array_json.begin(), array_json.end(), re);
   auto end = std::sregex_iterator();
   for (auto it = begin; it != end; ++it) {

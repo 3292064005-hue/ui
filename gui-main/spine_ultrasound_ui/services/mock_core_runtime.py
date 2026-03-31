@@ -13,8 +13,11 @@ from spine_ultrasound_ui.services.sdk_capability_service import SdkCapabilitySer
 from spine_ultrasound_ui.services.ipc_protocol import ReplyEnvelope, TelemetryEnvelope
 from spine_ultrasound_ui.services.pressure_sensor_service import ForceSensorProvider, create_force_sensor_provider
 from spine_ultrasound_ui.services.robot_identity_service import RobotIdentityService
+from spine_ultrasound_ui.utils.sdk_unit_contract import build_sdk_boundary_contract
 from spine_ultrasound_ui.services.xmate_model_service import XMateModelService
+from spine_ultrasound_ui.services.mainline_task_tree_service import MainlineTaskTreeService
 from spine_ultrasound_ui.utils import ensure_dir, now_ns
+from spine_ultrasound_ui.utils.runtime_fingerprint import payload_hash
 
 
 class MockCoreRuntime:
@@ -40,6 +43,9 @@ class MockCoreRuntime:
         self.contact_stable = False
         self.recommended_action = "IDLE"
         self.plan_hash = ""
+        self.locked_runtime_config_hash = ""
+        self.locked_sdk_boundary_hash = ""
+        self.locked_executor_hash = ""
         self.recovery_reason = ""
         self.last_recovery_action = ""
         self.image_quality = 0.82
@@ -98,6 +104,7 @@ class MockCoreRuntime:
         self.cart_force = [0.0] * 6
         self.pending_alarms: list[dict[str, Any]] = []
         self.model_service = XMateModelService()
+        self.mainline_task_tree = MainlineTaskTreeService()
         self.identity_service = RobotIdentityService()
         self.clinical_config_service = ClinicalConfigService()
         self.capability_service = SdkCapabilityService()
@@ -249,6 +256,7 @@ class MockCoreRuntime:
             "clinical_mainline_mode": profile.rt_mode,
             "approximate": True,
             "source": "python_profile_contract",
+            "duplication_policy": "desktop_advisory_only__official_fk_ik_jacobian_torque_stay_in_cpp_runtime",
         }
 
     def _identity_payload(self) -> dict[str, Any]:
@@ -268,7 +276,137 @@ class MockCoreRuntime:
             "desired_wrench_limits": list(identity.desired_wrench_limits),
         }
 
+    def _runtime_profile_payload(self) -> dict[str, Any]:
+        return {
+            "robot_model": self.config.robot_model,
+            "sdk_robot_class": self.config.sdk_robot_class,
+            "axis_count": int(self.config.axis_count),
+            "remote_ip": self.config.remote_ip,
+            "local_ip": self.config.local_ip,
+            "preferred_link": self.config.preferred_link,
+            "rt_mode": self.config.rt_mode,
+            "rt_network_tolerance_percent": int(self.config.rt_network_tolerance_percent),
+            "joint_filter_hz": float(self.config.joint_filter_hz),
+            "cart_filter_hz": float(self.config.cart_filter_hz),
+            "torque_filter_hz": float(self.config.torque_filter_hz),
+            "collision_detection_enabled": bool(self.config.collision_detection_enabled),
+            "soft_limit_enabled": bool(self.config.soft_limit_enabled),
+            "tool_name": self.config.tool_name,
+            "tcp_name": self.config.tcp_name,
+            "load_kg": float(self.config.load_kg),
+            "cartesian_impedance": list(self.config.cartesian_impedance),
+            "desired_wrench_n": list(self.config.desired_wrench_n),
+        }
+
+    def _executor_profile_payload(self) -> dict[str, Any]:
+        executor = self._mainline_executor_contract_payload()
+        return {
+            "nrt_templates": [item.get("name", "") for item in executor.get("nrt_executor", {}).get("templates", [])],
+            "rt_nominal_loop_hz": int(executor.get("rt_executor", {}).get("nominal_loop_hz", 1000) or 1000),
+            "rt_monitors": {
+                "reference_limiter": bool(executor.get("rt_executor", {}).get("reference_limiter_enabled", False)),
+                "freshness_guard": bool(executor.get("rt_executor", {}).get("freshness_guard_enabled", False)),
+                "jitter_monitor": bool(executor.get("rt_executor", {}).get("jitter_monitor_enabled", False)),
+                "contact_band_monitor": bool(executor.get("rt_executor", {}).get("contact_band_monitor_enabled", False)),
+            },
+        }
+
+    def _hardware_lifecycle_contract_payload(self) -> dict[str, Any]:
+        lifecycle_state = 'boot'
+        if self.controller_online:
+            lifecycle_state = 'connected'
+        if self.controller_online and self.powered:
+            lifecycle_state = 'powered'
+        if self.controller_online and self.powered and self.operate_mode == 'AUTO':
+            lifecycle_state = 'auto_ready'
+        if self.execution_state in {SystemState.CONTACT_SEEKING, SystemState.CONTACT_STABLE, SystemState.SCANNING, SystemState.PAUSED_HOLD}:
+            lifecycle_state = 'rt_active'
+        elif self.execution_state in {SystemState.PATH_VALIDATED, SystemState.APPROACHING, SystemState.RETREATING, SystemState.SCAN_COMPLETE}:
+            lifecycle_state = 'nrt_ready'
+        state_channel_ready = bool(self.controller_online)
+        motion_channel_ready = bool(self.controller_online and self.powered)
+        aux_channel_ready = bool(self.controller_online)
+        live_takeover = bool(self.controller_online and self.powered and self.operate_mode == 'AUTO')
+        return {
+            'summary_state': 'warning' if not live_takeover else 'ready',
+            'summary_label': 'hardware lifecycle ready' if live_takeover else 'hardware lifecycle contract only',
+            'detail': 'Mock runtime exposes hardware-layer lifecycle and channel readiness without claiming live SDK control.',
+            'runtime_source': 'mock_runtime_contract',
+            'sdk_binding_mode': 'contract_only',
+            'lifecycle_state': lifecycle_state,
+            'controller_manager_model': 'hardware_layer__read_update_write',
+            'transport_ready': bool(self.controller_online),
+            'motion_channel_ready': motion_channel_ready,
+            'state_channel_ready': state_channel_ready,
+            'aux_channel_ready': aux_channel_ready,
+            'live_takeover_ready': live_takeover,
+            'single_control_source_required': bool(self.config.requires_single_control_source),
+        }
+
+    def _rt_kernel_contract_payload(self) -> dict[str, Any]:
+        executor = self._mainline_executor_contract_payload()
+        rt_executor = dict(executor.get('rt_executor', {}))
+        jitter_budget_ms = round(max(0.25, 1000.0 / float(rt_executor.get('nominal_loop_hz', 1000) or 1000) * 0.2), 3)
+        freshness_budget_ms = int(self.config.pressure_stale_ms)
+        return {
+            'summary_state': 'warning' if not self.controller_online else 'ready',
+            'summary_label': 'rt kernel wrapped by official sdk lifecycle' if self.controller_online else 'rt kernel contract only',
+            'detail': 'RT kernel follows read/update/write staging and keeps limiter/guard semantics outside the official controller.',
+            'runtime_source': 'mock_runtime_contract',
+            'nominal_loop_hz': int(rt_executor.get('nominal_loop_hz', 1000) or 1000),
+            'read_update_write': ['read_state', 'update_phase_policy', 'write_command'],
+            'phase': str(rt_executor.get('phase', 'idle')),
+            'monitors': {
+                'reference_limiter': bool(rt_executor.get('reference_limiter_enabled', False)),
+                'freshness_guard': bool(rt_executor.get('freshness_guard_enabled', False)),
+                'jitter_monitor': bool(rt_executor.get('jitter_monitor_enabled', False)),
+                'contact_band_monitor': bool(rt_executor.get('contact_band_monitor_enabled', False)),
+            },
+            'jitter_budget_ms': jitter_budget_ms,
+            'freshness_budget_ms': freshness_budget_ms,
+            'reference_limits': {
+                'max_cart_step_mm': 2.5,
+                'max_force_delta_n': 1.0,
+            },
+            'degraded_without_sdk': True,
+        }
+
+    def _session_drift_contract_payload(self) -> dict[str, Any]:
+        runtime_profile_hash = payload_hash(self._runtime_profile_payload())
+        sdk_boundary = build_sdk_boundary_contract(fc_frame_matrix=self.config.fc_frame_matrix, tcp_frame_matrix=self.config.tcp_frame_matrix, load_com_mm=self.config.load_com_mm)
+        sdk_boundary_hash = str(sdk_boundary.get('contract_hash', '')) or payload_hash(sdk_boundary)
+        executor_hash = payload_hash(self._executor_profile_payload())
+        drifts: list[dict[str, Any]] = []
+        if self.session_id:
+            if self.locked_runtime_config_hash and self.locked_runtime_config_hash != runtime_profile_hash:
+                drifts.append({'name': 'runtime_profile_hash', 'detail': 'runtime config drifted after session lock'})
+            if self.locked_sdk_boundary_hash and self.locked_sdk_boundary_hash != sdk_boundary_hash:
+                drifts.append({'name': 'sdk_boundary_hash', 'detail': 'sdk boundary/unit contract drifted after session lock'})
+            if self.locked_executor_hash and self.locked_executor_hash != executor_hash:
+                drifts.append({'name': 'executor_profile_hash', 'detail': 'executor profile drifted after session lock'})
+            if self.locked_scan_plan_hash and self.plan_hash and self.locked_scan_plan_hash != self.plan_hash:
+                drifts.append({'name': 'plan_hash', 'detail': 'locked plan hash does not match active plan hash'})
+        summary_state = 'ready' if not drifts else 'blocked'
+        return {
+            'summary_state': summary_state,
+            'summary_label': 'hard freeze consistent' if summary_state == 'ready' else 'hard freeze drift detected',
+            'detail': 'Session hard freeze watches runtime profile, SDK boundary contract, executor profile, and plan hash.',
+            'session_locked': bool(self.session_id),
+            'locked_runtime_config_hash': self.locked_runtime_config_hash,
+            'active_runtime_config_hash': runtime_profile_hash,
+            'locked_sdk_boundary_hash': self.locked_sdk_boundary_hash,
+            'active_sdk_boundary_hash': sdk_boundary_hash,
+            'locked_executor_hash': self.locked_executor_hash,
+            'active_executor_hash': executor_hash,
+            'locked_scan_plan_hash': self.locked_scan_plan_hash,
+            'active_plan_hash': self.plan_hash,
+            'drifts': drifts,
+        }
+
     def _session_freeze_payload(self) -> dict[str, Any]:
+        runtime_profile_hash = payload_hash(self._runtime_profile_payload())
+        sdk_boundary = build_sdk_boundary_contract(fc_frame_matrix=self.config.fc_frame_matrix, tcp_frame_matrix=self.config.tcp_frame_matrix, load_com_mm=self.config.load_com_mm)
+        executor_hash = payload_hash(self._executor_profile_payload())
         return {
             "session_locked": bool(self.session_id),
             "session_id": self.session_id,
@@ -282,7 +420,169 @@ class MockCoreRuntime:
             "rt_mode": self.config.rt_mode,
             "cartesian_impedance": list(self.config.cartesian_impedance),
             "desired_wrench_n": list(self.config.desired_wrench_n),
+            "freeze_version": "hard_freeze_v2",
+            "runtime_profile_hash": runtime_profile_hash,
+            "sdk_boundary_hash": str(sdk_boundary.get('contract_hash', '')),
+            "executor_profile_hash": executor_hash,
         }
+
+    def _control_governance_contract_payload(self) -> dict[str, Any]:
+        session_locked = bool(self.session_id)
+        drift_contract = self._session_drift_contract_payload()
+        runtime_binding_valid = session_locked and not drift_contract.get('drifts')
+        return {
+            "single_control_source_required": bool(self.config.requires_single_control_source),
+            "control_authority_expected_source": "cpp_robot_core",
+            "write_surface": "core_runtime_only",
+            "current_execution_state": self.execution_state.value,
+            "controller_online": bool(self.controller_online),
+            "powered": bool(self.powered),
+            "automatic_mode": self.operate_mode == "AUTO",
+            "session_binding_valid": runtime_binding_valid,
+            "runtime_config_bound": session_locked,
+            "session_id": self.session_id,
+            "active_plan_hash": self.plan_hash,
+            "locked_scan_plan_hash": self.locked_scan_plan_hash,
+            "tool_ready": bool(self.tool_ready),
+            "tcp_ready": bool(self.tcp_ready),
+            "load_ready": bool(self.load_ready),
+            "rt_ready": bool(self.controller_online and self.powered and self.operate_mode == "AUTO" and self.config.rt_mode == "cartesianImpedance"),
+            "nrt_ready": bool(self.controller_online and self.powered),
+            "lifecycle_state": self._hardware_lifecycle_contract_payload().get('lifecycle_state', 'boot'),
+            "detail": "single control source contract requires session freeze + AUTO + powered + contract-aligned rt mode + no hard-freeze drift",
+        }
+
+    def _controller_evidence_payload(self) -> dict[str, Any]:
+        rt_kernel = self._rt_kernel_contract_payload()
+        return {
+            "runtime_source": "mock_runtime_contract",
+            "last_event": self.last_event,
+            "last_controller_log": self.last_controller_log,
+            "controller_log_tail": list(self.controller_logs[-6:]),
+            "rl_status": dict(self.rl_status),
+            "drag_state": dict(self.drag_state),
+            "registers": {"segment": int(self.active_segment), "frame": int(self.frame_id)},
+            "pending_alarm_count": len(self.pending_alarms),
+            "fault_code": self.fault_code,
+            "last_nrt_profile": 'safe_retreat' if self.execution_state == SystemState.RETREATING else ('approach_prescan' if self.execution_state == SystemState.APPROACHING else ''),
+            "last_rt_phase": str(rt_kernel.get('phase', 'idle')),
+            "reason_chain": [
+                item for item in [
+                    self.last_event or '',
+                    self.recovery_reason or '',
+                    self.last_recovery_action or '',
+                    self.fault_code or '',
+                ] if item
+            ],
+        }
+
+
+
+    def _dual_state_machine_contract_payload(self) -> dict[str, Any]:
+        runtime_state = self.execution_state.value
+        clinical_task_state = {
+            'BOOT': 'boot',
+            'DISCONNECTED': 'boot',
+            'CONNECTED': 'startup',
+            'POWERED': 'startup',
+            'AUTO_READY': 'startup',
+            'SESSION_LOCKED': 'session_locked',
+            'PATH_VALIDATED': 'plan_validated',
+            'APPROACHING': 'approaching',
+            'CONTACT_SEEKING': 'seek_contact',
+            'CONTACT_STABLE': 'contact_stable',
+            'SCANNING': 'scan_follow',
+            'PAUSED_HOLD': 'paused_hold',
+            'RETREATING': 'controlled_retract',
+            'SCAN_COMPLETE': 'completed',
+            'FAULT': 'fault',
+            'ESTOP': 'estop',
+        }.get(runtime_state, 'boot')
+        aligned = True
+        detail = '执行状态机与临床任务状态机已通过映射规则对齐。'
+        if runtime_state == 'SCANNING' and clinical_task_state != 'scan_follow':
+            aligned = False
+            detail = 'SCANNING 必须映射到 scan_follow。'
+        execution_permissions = {
+            'allow_nrt': runtime_state in {'AUTO_READY', 'SESSION_LOCKED', 'PATH_VALIDATED', 'SCAN_COMPLETE'},
+            'allow_rt_seek': runtime_state in {'PATH_VALIDATED', 'APPROACHING', 'CONTACT_SEEKING'},
+            'allow_rt_scan': runtime_state in {'CONTACT_STABLE', 'SCANNING', 'PAUSED_HOLD'},
+            'allow_retract': runtime_state not in {'BOOT', 'DISCONNECTED', 'ESTOP'},
+        }
+        return {
+            'summary_state': 'ready' if aligned else 'blocked',
+            'summary_label': '双层状态机已对齐' if aligned else '双层状态机冲突',
+            'detail': detail,
+            'runtime_state': runtime_state,
+            'clinical_task_state': clinical_task_state,
+            'execution_and_clinical_aligned': aligned,
+            'execution_permissions': execution_permissions,
+        }
+    
+    def _mainline_executor_contract_payload(self) -> dict[str, Any]:
+        runtime_state = self.execution_state.value
+        rt_phase = {
+            'APPROACHING': 'idle',
+            'CONTACT_SEEKING': 'seek_contact',
+            'CONTACT_STABLE': 'contact_hold',
+            'SCANNING': 'scan_follow',
+            'PAUSED_HOLD': 'pause_hold',
+            'RETREATING': 'controlled_retract',
+        }.get(runtime_state, 'idle')
+        nrt_templates = [
+            {'name': 'go_home', 'sdk_delegate': 'MoveAbsJ', 'blocking': True, 'preconditions': ['connected', 'powered']},
+            {'name': 'approach_prescan', 'sdk_delegate': 'MoveL', 'blocking': True, 'preconditions': ['session_locked', 'plan_validated', 'auto_mode']},
+            {'name': 'approach_entry', 'sdk_delegate': 'MoveL', 'blocking': True, 'preconditions': ['session_locked', 'plan_validated', 'auto_mode']},
+            {'name': 'safe_retreat', 'sdk_delegate': 'MoveL', 'blocking': True, 'preconditions': ['connected', 'powered']},
+        ]
+        rt_executor = {
+            'summary_state': 'warning' if not self.controller_online else 'ready',
+            'detail': 'RT executor wraps official cartesianImpedance mainline and keeps limiter/guard semantics in the runtime shell.',
+            'phase': rt_phase,
+            'phase_group': 'scan' if rt_phase in {'contact_hold', 'scan_follow', 'pause_hold'} else ('recovery' if rt_phase == 'controlled_retract' else ('contact' if rt_phase == 'seek_contact' else 'idle')),
+            'nominal_loop_hz': 1000,
+            'reference_limiter_enabled': True,
+            'freshness_guard_enabled': True,
+            'jitter_monitor_enabled': True,
+            'contact_band_monitor_enabled': True,
+            'delegation_policy': 'official_sdk_rt_loop_only',
+        }
+        nrt_executor = {
+            'summary_state': 'warning' if not self.controller_online else 'ready',
+            'detail': 'NRT executor only submits templated MoveAbsJ/MoveL intents and delegates planning to the official SDK.',
+            'templates': nrt_templates,
+            'last_blocking_template': 'approach_prescan' if runtime_state == 'APPROACHING' else ('safe_retreat' if runtime_state == 'RETREATING' else ''),
+            'delegation_policy': 'official_sdk_nrt_only',
+        }
+        task_tree_aligned = not (runtime_state == 'SCANNING' and rt_phase != 'scan_follow')
+        return {
+            'summary_state': 'ready' if task_tree_aligned else 'blocked',
+            'summary_label': '主线执行器已对齐' if task_tree_aligned else '主线执行器未对齐',
+            'detail': 'NRT/RT executor 合同描述的是意图、阶段与监测器，不替代官方控制器。',
+            'task_tree_aligned': task_tree_aligned,
+            'nrt_executor': nrt_executor,
+            'rt_executor': rt_executor,
+        }
+    
+    def _mainline_task_tree_payload(self) -> dict[str, Any]:
+        return dict(self.mainline_task_tree.build(
+            config=self.config,
+            sdk_runtime={
+                'control_governance_contract': self._control_governance_contract_payload(),
+                'clinical_mainline_contract': self._clinical_mainline_contract_payload(),
+                'release_contract': self._release_contract_payload(),
+                'mainline_executor_contract': self._mainline_executor_contract_payload(),
+                'dual_state_machine_contract': self._dual_state_machine_contract_payload(),
+                'environment_doctor': {'summary_state': 'warning', 'summary_label': 'mock environment', 'detail': 'mock runtime; live SDK not attached'},
+                'hardware_lifecycle_contract': self._hardware_lifecycle_contract_payload(),
+                'rt_kernel_contract': self._rt_kernel_contract_payload(),
+                'session_freeze': self._session_freeze_payload(),
+                'session_drift_contract': self._session_drift_contract_payload(),
+            },
+            backend_link={},
+            model_report={'final_verdict': dict(self.last_final_verdict.get('final_verdict', {}))},
+            session_governance={'summary_state': 'ready' if self.session_id else 'warning'},
+        ))
 
 
     def _capability_contract_payload(self) -> dict[str, Any]:
@@ -338,16 +638,25 @@ class MockCoreRuntime:
             "tcp_frame_matrix": list(self.config.tcp_frame_matrix),
             "load_com_mm": list(self.config.load_com_mm),
             "load_inertia": list(self.config.load_inertia),
+            "sdk_boundary_units": build_sdk_boundary_contract(fc_frame_matrix=self.config.fc_frame_matrix, tcp_frame_matrix=self.config.tcp_frame_matrix, load_com_mm=self.config.load_com_mm),
         }
 
 
     def _release_contract_payload(self) -> dict[str, Any]:
         safety = self._safety_status()
-        freeze_consistent = bool(self.session_id) and bool(self.session_dir) and self.tool_ready and self.tcp_ready and self.load_ready and (not self.locked_scan_plan_hash or not self.plan_hash or self.locked_scan_plan_hash == self.plan_hash)
+        drift_contract = self._session_drift_contract_payload()
+        hardware = self._hardware_lifecycle_contract_payload()
+        freeze_consistent = bool(self.session_id) and bool(self.session_dir) and self.tool_ready and self.tcp_ready and self.load_ready and not drift_contract.get('drifts')
         final_verdict = dict(self.last_final_verdict.get("final_verdict", {}))
         blockers = list(self.last_final_verdict.get("blockers", []))
         warnings = list(self.last_final_verdict.get("warnings", []))
+        if drift_contract.get('drifts'):
+            blockers.append({'name': 'hard_freeze_drift', 'detail': 'session hard freeze drift detected'})
+        if hardware.get('summary_state') in {'warning', 'degraded'}:
+            warnings.append({'name': 'hardware_lifecycle_not_live', 'detail': str(hardware.get('detail', 'hardware lifecycle not live'))})
+        release_allowed = bool(final_verdict.get("accepted")) and freeze_consistent and not safety.get("active_interlocks")
         return {
+            "summary_state": 'ready' if release_allowed else ('blocked' if blockers or safety.get('active_interlocks') else 'warning'),
             "session_locked": bool(self.session_id),
             "session_freeze_consistent": freeze_consistent,
             "locked_scan_plan_hash": self.locked_scan_plan_hash,
@@ -356,12 +665,14 @@ class MockCoreRuntime:
             "compile_ready": bool(final_verdict.get("accepted")) and freeze_consistent,
             "ready_for_approach": bool(final_verdict.get("accepted")) and freeze_consistent and self.execution_state == SystemState.PATH_VALIDATED,
             "ready_for_scan": bool(final_verdict.get("accepted")) and freeze_consistent and self.execution_state == SystemState.CONTACT_STABLE,
-            "release_recommendation": "allow" if bool(final_verdict.get("accepted")) and freeze_consistent and not safety.get("active_interlocks") else "block",
+            "release_recommendation": "allow" if release_allowed else "block",
             "active_interlocks": list(safety.get("active_interlocks", [])),
             "final_verdict": final_verdict,
             "blockers": blockers,
             "warnings": warnings,
             "active_injections": sorted(self.injected_faults),
+            'hardware_lifecycle': {'summary_state': hardware.get('summary_state', 'unknown'), 'lifecycle_state': hardware.get('lifecycle_state', 'boot')},
+            'hard_freeze': {'summary_state': drift_contract.get('summary_state', 'unknown'), 'drift_count': len(drift_contract.get('drifts', []))},
         }
 
 
@@ -500,6 +811,7 @@ class MockCoreRuntime:
                 "collision_behavior": self.config.collision_behavior,
                 "collision_detection_enabled": self.config.collision_detection_enabled,
                 "soft_limit_enabled": self.config.soft_limit_enabled,
+                "sdk_boundary_units": build_sdk_boundary_contract(fc_frame_matrix=self.config.fc_frame_matrix, tcp_frame_matrix=self.config.tcp_frame_matrix, load_com_mm=self.config.load_com_mm),
             },
         )
 
@@ -527,6 +839,38 @@ class MockCoreRuntime:
     def _cmd_get_session_freeze(self, payload: dict) -> ReplyEnvelope:
         del payload
         return ReplyEnvelope(ok=True, message="get_session_freeze accepted", data=self._session_freeze_payload())
+
+    def _cmd_get_session_drift_contract(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_session_drift_contract accepted", data=self._session_drift_contract_payload())
+
+    def _cmd_get_hardware_lifecycle_contract(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_hardware_lifecycle_contract accepted", data=self._hardware_lifecycle_contract_payload())
+
+    def _cmd_get_rt_kernel_contract(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_rt_kernel_contract accepted", data=self._rt_kernel_contract_payload())
+
+    def _cmd_get_control_governance_contract(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_control_governance_contract accepted", data=self._control_governance_contract_payload())
+
+    def _cmd_get_controller_evidence(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_controller_evidence accepted", data=self._controller_evidence_payload())
+
+    def _cmd_get_dual_state_machine_contract(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_dual_state_machine_contract accepted", data=self._dual_state_machine_contract_payload())
+
+    def _cmd_get_mainline_executor_contract(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_mainline_executor_contract accepted", data=self._mainline_executor_contract_payload())
+
+    def _cmd_get_mainline_task_tree(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_mainline_task_tree accepted", data=self._mainline_task_tree_payload())
 
     def _cmd_get_recovery_contract(self, payload: dict) -> ReplyEnvelope:
         del payload
@@ -681,6 +1025,10 @@ class MockCoreRuntime:
         self.force_sensor_provider_name = str(payload.get("force_sensor_provider", self.config.force_sensor_provider))
         self.force_sensor_provider = create_force_sensor_provider(self.force_sensor_provider_name)
         self._open_recorders(self.session_dir, self.session_id)
+        self.locked_runtime_config_hash = payload_hash(self._runtime_profile_payload())
+        sdk_boundary = build_sdk_boundary_contract(fc_frame_matrix=self.config.fc_frame_matrix, tcp_frame_matrix=self.config.tcp_frame_matrix, load_com_mm=self.config.load_com_mm)
+        self.locked_sdk_boundary_hash = str(sdk_boundary.get('contract_hash', ''))
+        self.locked_executor_hash = payload_hash(self._executor_profile_payload())
         self.session_locked_ts_ns = now_ns()
         self.execution_state = SystemState.SESSION_LOCKED
         self._append_controller_log("INFO", f"session locked: {self.session_id}")

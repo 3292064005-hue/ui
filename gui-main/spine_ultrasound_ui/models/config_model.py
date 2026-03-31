@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List
 
+from spine_ultrasound_ui.utils.sdk_unit_contract import build_sdk_boundary_contract
+
 
 @dataclass
 class RuntimeConfig:
@@ -71,7 +73,20 @@ class RuntimeConfig:
     load_inertia: List[float] = field(default_factory=lambda: [0.0012, 0.0012, 0.0008, 0.0, 0.0, 0.0])
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        payload["sdk_boundary_units"] = build_sdk_boundary_contract(
+            fc_frame_matrix=self.fc_frame_matrix,
+            tcp_frame_matrix=self.tcp_frame_matrix,
+            load_com_mm=self.load_com_mm,
+        )
+        return payload
+
+    def sdk_boundary_contract(self) -> Dict[str, Any]:
+        return build_sdk_boundary_contract(
+            fc_frame_matrix=self.fc_frame_matrix,
+            tcp_frame_matrix=self.tcp_frame_matrix,
+            load_com_mm=self.load_com_mm,
+        )
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "RuntimeConfig":

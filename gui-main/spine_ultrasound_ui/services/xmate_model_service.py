@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from spine_ultrasound_ui.models import RuntimeConfig, ScanPlan
+from spine_ultrasound_ui.utils.sdk_unit_contract import build_sdk_boundary_contract
 from spine_ultrasound_ui.services.xmate_profile import XMateProfile, load_xmate_profile
+from spine_ultrasound_ui.utils.runtime_fingerprint import payload_hash
 
 
 @dataclass
@@ -47,6 +49,7 @@ class XMateModelService:
 
     def __init__(self, profile: XMateProfile | None = None) -> None:
         self.profile = profile or load_xmate_profile()
+        self._report_cache: dict[str, dict[str, Any]] = {}
 
     def build_report(self, plan: ScanPlan | None, config: RuntimeConfig) -> dict[str, Any]:
         if plan is None or not plan.segments:
@@ -57,9 +60,24 @@ class XMateModelService:
                 "warnings": [],
                 "blockers": [],
                 "approximate": True,
+                "authority": "advisory_python",
+                "sdk_boundary_units": build_sdk_boundary_contract(fc_frame_matrix=config.fc_frame_matrix, tcp_frame_matrix=config.tcp_frame_matrix, load_com_mm=config.load_com_mm),
                 "envelope": {},
                 "dh_parameters": [item.to_dict() for item in self.profile.dh_parameters],
             }
+        cache_key = payload_hash({
+            "plan_hash": plan.plan_hash(),
+            "segments": len(plan.segments),
+            "waypoints": sum(len(segment.waypoints) for segment in plan.segments),
+            "rt_mode": config.rt_mode,
+            "axis_count": config.axis_count,
+            "sdk_robot_class": config.sdk_robot_class,
+            "tcp_frame_matrix": list(config.tcp_frame_matrix),
+            "load_com_mm": list(config.load_com_mm),
+        })
+        cached = self._report_cache.get(cache_key)
+        if cached is not None:
+            return dict(cached)
         envelope = self._compute_envelope(plan)
         checks = self._checks(plan, envelope, config)
         blockers = [item for item in checks if item["severity"] == "blocker" and not item["ok"]]
@@ -73,7 +91,7 @@ class XMateModelService:
         planner_context = dict(validation_summary.get("planner_context", {}))
         execution_candidates = list(planner_context.get("execution_candidates", []))
         selection = dict(planner_context.get("selection_rationale", {}))
-        return {
+        report = {
             "summary_state": state,
             "summary_label": {
                 "ready": "模型前检通过",
@@ -85,6 +103,8 @@ class XMateModelService:
             "blockers": blockers,
             "checks": checks,
             "approximate": True,
+            "authority": "advisory_python",
+            "sdk_boundary_units": build_sdk_boundary_contract(fc_frame_matrix=config.fc_frame_matrix, tcp_frame_matrix=config.tcp_frame_matrix, load_com_mm=config.load_com_mm),
             "model_contract": {
                 "robot_model": self.profile.robot_model,
                 "sdk_robot_class": self.profile.sdk_robot_class,
@@ -93,6 +113,7 @@ class XMateModelService:
                 "supported_rt_modes": list(self.profile.supported_rt_modes),
                 "planner_enabled": True,
                 "xmate_model_enabled": True,
+                "duplication_policy": "desktop_advisory_only__official_fk_ik_jacobian_torque_stay_in_sdk_runtime",
             },
             "envelope": envelope.to_dict(),
             "dh_parameters": [item.to_dict() for item in self.profile.dh_parameters],
@@ -112,6 +133,10 @@ class XMateModelService:
                 "selected_score": selection.get("selected_score", dict(plan.score_summary)),
             },
         }
+        self._report_cache[cache_key] = dict(report)
+        if len(self._report_cache) > 16:
+            self._report_cache.pop(next(iter(self._report_cache)))
+        return report
 
     def _compute_envelope(self, plan: ScanPlan) -> PathEnvelope:
         points = [plan.approach_pose]
@@ -195,6 +220,13 @@ class XMateModelService:
             "warning",
             f"最大姿态步进 {envelope.max_rotation_step_deg:.2f}°，未见明显突变。",
             f"最大姿态步进 {envelope.max_rotation_step_deg:.2f}° 偏大，建议复查姿态跟随与末端法向约束。",
+        ))
+        checks.append(self._check(
+            "单位边界契约",
+            build_sdk_boundary_contract(fc_frame_matrix=config.fc_frame_matrix, tcp_frame_matrix=config.tcp_frame_matrix, load_com_mm=config.load_com_mm)["sdk_length_unit"] == "m",
+            "blocker",
+            "模型前检遵守 UI(mm) → SDK(m) 边界换算。",
+            "模型前检检测到单位边界合同丢失。",
         ))
         checks.append(self._check(
             "临床 RT 模式",

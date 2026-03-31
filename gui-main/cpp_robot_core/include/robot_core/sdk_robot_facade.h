@@ -33,6 +33,18 @@ struct SdkRobotRuntimeConfig {
                                            0.0, 0.0, 0.0, 1.0}};
   std::array<double, 3> load_com_mm{{0.0, 0.0, 62.0}};
   std::array<double, 6> load_inertia{{0.0012, 0.0012, 0.0008, 0.0, 0.0, 0.0}};
+  std::array<double, 16> fc_frame_matrix_m{{1.0, 0.0, 0.0, 0.0,
+                                            0.0, 1.0, 0.0, 0.0,
+                                            0.0, 0.0, 1.0, 0.0,
+                                            0.0, 0.0, 0.0, 1.0}};
+  std::array<double, 16> tcp_frame_matrix_m{{1.0, 0.0, 0.0, 0.0,
+                                             0.0, 1.0, 0.0, 0.0,
+                                             0.0, 0.0, 1.0, 0.062,
+                                             0.0, 0.0, 0.0, 1.0}};
+  std::array<double, 3> load_com_m{{0.0, 0.0, 0.062}};
+  std::string ui_length_unit{"mm"};
+  std::string sdk_length_unit{"m"};
+  bool boundary_normalized{true};
 };
 
 struct SdkRobotProjectInfo {
@@ -76,6 +88,12 @@ public:
   bool automaticMode() const;
   bool sdkAvailable() const;
   bool xmateModelAvailable() const;
+  bool rtMainlineConfigured() const;
+  bool motionChannelReady() const;
+  bool stateChannelReady() const;
+  bool auxChannelReady() const;
+  std::string sdkBindingMode() const;
+  std::string hardwareLifecycleState() const;
   std::string runtimeSource() const;
   SdkRobotRuntimeConfig runtimeConfig() const;
   std::vector<double> jointPos() const;
@@ -105,6 +123,10 @@ private:
   bool connected_{false};
   bool powered_{false};
   bool auto_mode_{false};
+  bool rt_mainline_configured_{false};
+  bool motion_channel_ready_{false};
+  bool state_channel_ready_{false};
+  bool aux_channel_ready_{false};
   SdkRobotRuntimeConfig rt_config_{};
   std::vector<double> joint_pos_;
   std::vector<double> joint_vel_;

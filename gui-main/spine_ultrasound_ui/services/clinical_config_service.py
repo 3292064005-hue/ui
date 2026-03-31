@@ -5,6 +5,7 @@ from typing import Any
 
 from spine_ultrasound_ui.models import RuntimeConfig
 from spine_ultrasound_ui.services.robot_identity_service import RobotIdentity, RobotIdentityService
+from spine_ultrasound_ui.utils.sdk_unit_contract import build_sdk_boundary_contract, extract_frame_translation_mm
 from spine_ultrasound_ui.services.xmate_profile import XMateProfile, load_xmate_profile
 
 
@@ -139,6 +140,26 @@ class ClinicalConfigService:
             "fc_frame_matrix / tcp_frame_matrix 均为 4x4 展平矩阵。",
             "fc_frame_matrix 或 tcp_frame_matrix 不是 16 维齐次矩阵。",
         ))
+        unit_contract = build_sdk_boundary_contract(
+            fc_frame_matrix=config.fc_frame_matrix,
+            tcp_frame_matrix=config.tcp_frame_matrix,
+            load_com_mm=config.load_com_mm,
+        )
+        tcp_translation_mm = extract_frame_translation_mm(config.tcp_frame_matrix)
+        checks.append(self._check(
+            "SDK 边界单位契约",
+            unit_contract["sdk_length_unit"] == "m" and unit_contract["ui_length_unit"] == "mm",
+            "blocker",
+            "桌面规划保持 mm，SDK 边界统一换算到 m。",
+            "单位契约异常：桌面/UI 与 SDK 边界单位未固定为 mm→m。",
+        ))
+        checks.append(self._check(
+            "TCP 平移量",
+            len(tcp_translation_mm) == 3 and max(abs(value) for value in tcp_translation_mm) <= 250.0,
+            "warning",
+            f"tcp translation={tcp_translation_mm} mm，仍在探头/TCP 常见量级内。",
+            f"tcp translation={tcp_translation_mm} mm，疑似配置错误或量纲混淆。",
+        ))
         checks.append(self._check(
             "负载参数维度",
             len(config.load_com_mm) == 3 and len(config.load_inertia) == 6 and config.load_kg > 0,
@@ -213,6 +234,11 @@ class ClinicalConfigService:
                 "warning_force_n": self.profile.contact_force_policy.get("warning_n", 0.0),
                 "cartesian_impedance_limits": list(self.identity.cartesian_impedance_limits),
                 "desired_wrench_limits": list(self.identity.desired_wrench_limits),
+                "sdk_boundary_units": build_sdk_boundary_contract(
+                    fc_frame_matrix=config.fc_frame_matrix,
+                    tcp_frame_matrix=config.tcp_frame_matrix,
+                    load_com_mm=config.load_com_mm,
+                ),
             },
         }
 
