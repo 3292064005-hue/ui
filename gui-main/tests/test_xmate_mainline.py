@@ -19,7 +19,7 @@ def _app():
 
 def test_xmate_profile_defaults_align_with_er3_mainline():
     profile = load_xmate_profile()
-    assert profile.robot_model == 'xmate_er3'
+    assert profile.robot_model == 'xmate3'
     assert profile.sdk_robot_class == 'xMateRobot'
     assert profile.axis_count == 6
     assert profile.rt_loop_hz == 1000

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -12,6 +13,7 @@
 #include "robot_core/recovery_policy.h"
 #include "robot_core/scan_plan_parser.h"
 #include "robot_core/scan_plan_validator.h"
+#include "robot_core/sdk_robot_facade.h"
 #include "robot_core/state_machine_guard.h"
 #include "robot_core/recovery_manager.h"
 #include "robot_core/robot_state_hub.h"
@@ -46,6 +48,15 @@ private:
   void applyConfigFromJsonLocked(const std::string& json_line);
   void loadPlanFromJsonLocked(const std::string& json_line);
   FinalVerdict compileScanPlanVerdictLocked(const std::string& json_line);
+  void appendMainlineContractIssuesLocked(std::vector<std::string>* blockers, std::vector<std::string>* warnings) const;
+  bool sessionFreezeConsistentLocked() const;
+  std::string capabilityContractJsonLocked() const;
+  std::string modelAuthorityContractJsonLocked() const;
+  std::string releaseContractJsonLocked() const;
+  std::string deploymentContractJsonLocked() const;
+  std::string faultInjectionContractJsonLocked() const;
+  bool applyFaultInjectionLocked(const std::string& fault_name, std::string* error_message);
+  void clearInjectedFaultsLocked();
   std::string finalVerdictJson(const FinalVerdict& verdict) const;
   std::string replyJson(const std::string& request_id, bool ok, const std::string& message, const std::string& data_json = "{}") const;
 
@@ -66,6 +77,7 @@ private:
   std::string session_dir_;
   std::string plan_id_;
   std::string plan_hash_;
+  std::string locked_scan_plan_hash_;
   bool plan_loaded_{false};
   int total_points_{0};
   int total_segments_{0};
@@ -74,6 +86,7 @@ private:
   int active_segment_{0};
   int active_waypoint_index_{0};
   int retreat_ticks_remaining_{0};
+  int64_t session_locked_ts_ns_{0};
   double progress_pct_{0.0};
   double phase_{0.0};
   double pressure_current_{0.0};
@@ -99,7 +112,9 @@ private:
   ScanPlanParser scan_plan_parser_{};
   ScanPlanValidator scan_plan_validator_{};
   StateMachineGuard state_machine_guard_{};
+  SdkRobotFacade sdk_robot_{};
   ForceControlLimits force_limits_{loadForceControlLimits()};
+  std::set<std::string> injected_faults_{};
 };
 
 }  // namespace robot_core

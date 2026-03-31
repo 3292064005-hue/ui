@@ -1,4 +1,4 @@
-robot_model: xmate_er3
+robot_model: xmate3
 sdk_robot_class: xMateRobot
 controller_series: xCore
 controller_version: v2.1+
@@ -32,7 +32,7 @@ rt_network_tolerance_percent: 15
 joint_filter_hz: 40.0
 cart_filter_hz: 30.0
 torque_filter_hz: 25.0
-cartesian_impedance: [2200.0, 2200.0, 1400.0, 45.0, 45.0, 35.0]
+cartesian_impedance: [1000.0, 1000.0, 1000.0, 80.0, 80.0, 80.0]
 desired_wrench_n: [0.0, 0.0, 8.0, 0.0, 0.0, 0.0]
 fc_frame_type: path
 fc_frame_matrix: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
@@ -64,8 +64,8 @@ sweep_policy:
   max_rescan_passes: 2
 dh_parameters:
   - {joint: 1, a_mm: 0.0, alpha_rad: -1.57079632679, d_mm: 341.5, theta_rad: 0.0}
-  - {joint: 2, a_mm: 0.0, alpha_rad: 1.57079632679, d_mm: 0.0, theta_rad: 0.0}
-  - {joint: 3, a_mm: 0.0, alpha_rad: -1.57079632679, d_mm: 394.0, theta_rad: 0.0}
-  - {joint: 4, a_mm: 0.0, alpha_rad: 1.57079632679, d_mm: 0.0, theta_rad: 0.0}
-  - {joint: 5, a_mm: 0.0, alpha_rad: -1.57079632679, d_mm: 366.0, theta_rad: 0.0}
-  - {joint: 6, a_mm: 0.0, alpha_rad: 1.57079632679, d_mm: 0.0, theta_rad: 0.0}
+  - {joint: 2, a_mm: 394.0, alpha_rad: 0.0, d_mm: 0.0, theta_rad: 0.0}
+  - {joint: 3, a_mm: 0.0, alpha_rad: 1.57079632679, d_mm: 0.0, theta_rad: 0.0}
+  - {joint: 4, a_mm: 0.0, alpha_rad: -1.57079632679, d_mm: 366.0, theta_rad: 0.0}
+  - {joint: 5, a_mm: 0.0, alpha_rad: 1.57079632679, d_mm: 0.0, theta_rad: 0.0}
+  - {joint: 6, a_mm: 0.0, alpha_rad: 0.0, d_mm: 250.3, theta_rad: 0.0}

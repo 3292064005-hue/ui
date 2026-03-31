@@ -6,6 +6,7 @@ from typing import Any, Callable
 from spine_ultrasound_ui.models import RuntimeConfig
 from spine_ultrasound_ui.services.backend_base import BackendBase
 from spine_ultrasound_ui.services.ipc_protocol import ReplyEnvelope
+from spine_ultrasound_ui.services.sdk_environment_doctor_service import SdkEnvironmentDoctorService
 
 
 @dataclass
@@ -18,6 +19,20 @@ class SdkRuntimeAssetSnapshot:
     io_snapshot: dict[str, Any] = field(default_factory=dict)
     safety_profile: dict[str, Any] = field(default_factory=dict)
     motion_contract: dict[str, Any] = field(default_factory=dict)
+    register_snapshot: dict[str, Any] = field(default_factory=dict)
+    runtime_alignment: dict[str, Any] = field(default_factory=dict)
+    xmate_model_summary: dict[str, Any] = field(default_factory=dict)
+    runtime_config_snapshot: dict[str, Any] = field(default_factory=dict)
+    environment_doctor: dict[str, Any] = field(default_factory=dict)
+    identity_contract: dict[str, Any] = field(default_factory=dict)
+    clinical_mainline_contract: dict[str, Any] = field(default_factory=dict)
+    capability_contract: dict[str, Any] = field(default_factory=dict)
+    model_authority_contract: dict[str, Any] = field(default_factory=dict)
+    session_freeze: dict[str, Any] = field(default_factory=dict)
+    recovery_contract: dict[str, Any] = field(default_factory=dict)
+    release_contract: dict[str, Any] = field(default_factory=dict)
+    deployment_contract: dict[str, Any] = field(default_factory=dict)
+    fault_injection_contract: dict[str, Any] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -30,6 +45,20 @@ class SdkRuntimeAssetSnapshot:
             "io_snapshot": dict(self.io_snapshot),
             "safety_profile": dict(self.safety_profile),
             "motion_contract": dict(self.motion_contract),
+            "register_snapshot": dict(self.register_snapshot),
+            "runtime_alignment": dict(self.runtime_alignment),
+            "xmate_model_summary": dict(self.xmate_model_summary),
+            "runtime_config_snapshot": dict(self.runtime_config_snapshot),
+            "environment_doctor": dict(self.environment_doctor),
+            "identity_contract": dict(self.identity_contract),
+            "clinical_mainline_contract": dict(self.clinical_mainline_contract),
+            "capability_contract": dict(self.capability_contract),
+            "model_authority_contract": dict(self.model_authority_contract),
+            "session_freeze": dict(self.session_freeze),
+            "recovery_contract": dict(self.recovery_contract),
+            "release_contract": dict(self.release_contract),
+            "deployment_contract": dict(self.deployment_contract),
+            "fault_injection_contract": dict(self.fault_injection_contract),
             "errors": list(self.errors),
         }
 
@@ -45,6 +74,7 @@ class SdkRuntimeAssetService:
 
     def __init__(self) -> None:
         self.snapshot = SdkRuntimeAssetSnapshot()
+        self.doctor = SdkEnvironmentDoctorService()
 
     def refresh(self, backend: BackendBase, config: RuntimeConfig) -> dict[str, Any]:
         self.snapshot = SdkRuntimeAssetSnapshot()
@@ -62,6 +92,20 @@ class SdkRuntimeAssetService:
         motion_contract.setdefault("preferred_link", config.preferred_link)
         motion_contract.setdefault("network_tolerance_percent", config.rt_network_tolerance_percent)
         self.snapshot.motion_contract = motion_contract
+        self.snapshot.register_snapshot = dict(self._query_data(backend, "get_register_snapshot", {}, default={}))
+        self.snapshot.runtime_alignment = dict(self._query_data(backend, "get_runtime_alignment", {}, default={}))
+        self.snapshot.xmate_model_summary = dict(self._query_data(backend, "get_xmate_model_summary", {}, default={}))
+        self.snapshot.runtime_config_snapshot = dict(self._query_data(backend, "get_sdk_runtime_config", {}, default={}))
+        self.snapshot.environment_doctor = dict(self.doctor.inspect(config))
+        self.snapshot.identity_contract = dict(self._query_data(backend, "get_identity_contract", {}, default={}))
+        self.snapshot.clinical_mainline_contract = dict(self._query_data(backend, "get_clinical_mainline_contract", {}, default={}))
+        self.snapshot.capability_contract = dict(self._query_data(backend, "get_capability_contract", {}, default={}))
+        self.snapshot.model_authority_contract = dict(self._query_data(backend, "get_model_authority_contract", {}, default={}))
+        self.snapshot.session_freeze = dict(self._query_data(backend, "get_session_freeze", {}, default={}))
+        self.snapshot.recovery_contract = dict(self._query_data(backend, "get_recovery_contract", {}, default={}))
+        self.snapshot.release_contract = dict(self._query_data(backend, "get_release_contract", {}, default={}))
+        self.snapshot.deployment_contract = dict(self._query_data(backend, "get_deployment_contract", {}, default={}))
+        self.snapshot.fault_injection_contract = dict(self._query_data(backend, "get_fault_injection_contract", {}, default={}))
         return self.snapshot.to_dict()
 
     def _query_list(self, backend: BackendBase, command: str, payload: dict[str, Any], key: str) -> list[dict[str, Any]]:

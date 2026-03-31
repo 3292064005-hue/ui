@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from spine_ultrasound_ui.services.robot_identity_service import OfficialDhParameter, RobotIdentityService
+
 
 @dataclass
 class DhParameter:
@@ -20,7 +22,7 @@ class DhParameter:
 
 @dataclass
 class XMateProfile:
-    robot_model: str = "xmate_er3"
+    robot_model: str = "xmate3"
     sdk_robot_class: str = "xMateRobot"
     controller_series: str = "xCore"
     controller_version: str = "v2.1+"
@@ -63,7 +65,7 @@ class XMateProfile:
     soft_limit_enabled: bool = True
     joint_soft_limit_margin_deg: float = 5.0
     singularity_avoidance_enabled: bool = True
-    cartesian_impedance: list[float] = field(default_factory=lambda: [2200.0, 2200.0, 1400.0, 45.0, 45.0, 35.0])
+    cartesian_impedance: list[float] = field(default_factory=lambda: [1000.0, 1000.0, 1000.0, 80.0, 80.0, 80.0])
     desired_wrench_n: list[float] = field(default_factory=lambda: [0.0, 0.0, 8.0, 0.0, 0.0, 0.0])
     fc_frame_type: str = "path"
     fc_frame_matrix: list[float] = field(default_factory=lambda: [
@@ -105,11 +107,11 @@ class XMateProfile:
     ])
     dh_parameters: list[DhParameter] = field(default_factory=lambda: [
         DhParameter(1, 0.0, -1.57079632679, 341.5),
-        DhParameter(2, 0.0, 1.57079632679, 0.0),
-        DhParameter(3, 0.0, -1.57079632679, 394.0),
-        DhParameter(4, 0.0, 1.57079632679, 0.0),
-        DhParameter(5, 0.0, -1.57079632679, 366.0),
-        DhParameter(6, 0.0, 1.57079632679, 0.0),
+        DhParameter(2, 394.0, 0.0, 0.0),
+        DhParameter(3, 0.0, 1.57079632679, 0.0),
+        DhParameter(4, 0.0, -1.57079632679, 366.0),
+        DhParameter(5, 0.0, 1.57079632679, 0.0),
+        DhParameter(6, 0.0, 0.0, 250.3),
     ])
 
     def to_dict(self) -> dict[str, Any]:
@@ -164,9 +166,28 @@ def _coerce_list(value: Any, length: int, default: list[float]) -> list[float]:
     return payload
 
 
+def _identity_default_profile() -> XMateProfile:
+    identity = RobotIdentityService().resolve("xmate3")
+    return XMateProfile(
+        robot_model=identity.robot_model,
+        sdk_robot_class=identity.sdk_robot_class,
+        controller_series=identity.controller_series,
+        controller_version=identity.controller_version,
+        axis_count=identity.axis_count,
+        preferred_link=identity.preferred_link,
+        requires_single_control_source=identity.requires_single_control_source,
+        rt_mode=identity.rt_mode,
+        supported_rt_modes=list(identity.supported_rt_modes),
+        clinical_allowed_modes=list(identity.clinical_allowed_modes),
+        cartesian_impedance=[1000.0, 1000.0, 1000.0, 80.0, 80.0, 80.0],
+        desired_wrench_n=[0.0, 0.0, 8.0, 0.0, 0.0, 0.0],
+        dh_parameters=[DhParameter(item.joint, item.a_mm, item.alpha_rad, item.d_mm, item.theta_rad) for item in identity.official_dh_parameters],
+    )
+
+
 def load_xmate_profile(path: Path | None = None) -> XMateProfile:
     target = path or xmate_profile_path()
-    defaults = XMateProfile()
+    defaults = _identity_default_profile()
     if not target.exists():
         return defaults
     try:
@@ -176,8 +197,16 @@ def load_xmate_profile(path: Path | None = None) -> XMateProfile:
     raw = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
         return defaults
+
+    identity_service = RobotIdentityService(defaults.robot_model)
+    identity = identity_service.resolve(
+        str(raw.get("robot_model", defaults.robot_model)),
+        str(raw.get("sdk_robot_class", defaults.sdk_robot_class)),
+        int(raw.get("axis_count", defaults.axis_count)),
+    )
+
     dh_payload = raw.get("dh_parameters", [])
-    dh_parameters = []
+    dh_parameters: list[DhParameter] = []
     for item in dh_payload if isinstance(dh_payload, list) else []:
         if not isinstance(item, dict):
             continue
@@ -190,13 +219,24 @@ def load_xmate_profile(path: Path | None = None) -> XMateProfile:
                 theta_rad=float(item.get("theta_rad", item.get("theta", 0.0))),
             )
         )
+
     data = defaults.to_dict()
     data.update(raw)
     data.pop("sdk_mainline", None)
     data.pop("rt_control_contract", None)
     data.pop("safety_contract", None)
     data.pop("clinical_scan_contract", None)
-    data["dh_parameters"] = dh_parameters or defaults.dh_parameters
+    data["robot_model"] = identity.robot_model
+    data["sdk_robot_class"] = identity.sdk_robot_class
+    data["axis_count"] = identity.axis_count
+    data["controller_series"] = identity.controller_series
+    data["controller_version"] = identity.controller_version
+    data["preferred_link"] = str(raw.get("preferred_link", identity.preferred_link))
+    data["rt_mode"] = str(raw.get("rt_mode", identity.rt_mode))
+    data["supported_rt_modes"] = list(raw.get("supported_rt_modes", list(identity.supported_rt_modes)))
+    data["clinical_allowed_modes"] = list(raw.get("clinical_allowed_modes", list(identity.clinical_allowed_modes)))
+    data["requires_single_control_source"] = bool(raw.get("requires_single_control_source", identity.requires_single_control_source))
+    data["dh_parameters"] = dh_parameters or [DhParameter(item.joint, item.a_mm, item.alpha_rad, item.d_mm, item.theta_rad) for item in identity.official_dh_parameters]
     data["tool_name"] = str(raw.get("tool_name", raw.get("tcp_name", defaults.tool_name)))
     data["load_mass_kg"] = float(raw.get("load_mass_kg", raw.get("load_mass", raw.get("load_kg", defaults.load_mass_kg))))
     data["load_com_mm"] = _coerce_list(raw.get("load_com_mm"), 3, defaults.load_com_mm)

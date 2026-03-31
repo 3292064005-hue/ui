@@ -228,6 +228,36 @@ inline std::string extractArray(const std::string& json_line, const std::string&
   return fallback;
 }
 
+inline std::vector<double> extractDoubleArray(const std::string& json_line, const std::string& key, const std::vector<double>& fallback = {}) {
+  const auto array_json = extractArray(json_line, key, "");
+  if (array_json.empty()) {
+    return fallback;
+  }
+  std::vector<double> values;
+  const std::regex re("-?[0-9]+(?:\.[0-9]+)?");
+  auto begin = std::sregex_iterator(array_json.begin(), array_json.end(), re);
+  auto end = std::sregex_iterator();
+  for (auto it = begin; it != end; ++it) {
+    values.push_back(std::stod(it->str()));
+  }
+  return values.empty() ? fallback : values;
+}
+
+inline std::vector<std::string> extractStringArray(const std::string& json_line, const std::string& key, const std::vector<std::string>& fallback = {}) {
+  const auto array_json = extractArray(json_line, key, "");
+  if (array_json.empty()) {
+    return fallback;
+  }
+  std::vector<std::string> values;
+  const std::regex re(""([^"]*)"");
+  auto begin = std::sregex_iterator(array_json.begin(), array_json.end(), re);
+  auto end = std::sregex_iterator();
+  for (auto it = begin; it != end; ++it) {
+    values.push_back((*it)[1].str());
+  }
+  return values.empty() ? fallback : values;
+}
+
 inline std::vector<std::string> splitTopLevelObjects(const std::string& json_array) {
   std::vector<std::string> objects;
   bool in_string = false;

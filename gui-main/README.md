@@ -90,6 +90,14 @@ python run.py --backend api --api-base-url http://127.0.0.1:8000
 
 ### Build and start `spine_robot_core`
 
+如果已经挂载 SDK：
+
+```bash
+export XCORE_SDK_ROOT=/opt/rokae/librokae
+```
+
+然后：
+
 ```bash
 cmake -S cpp_robot_core -B cpp_robot_core/build -DCMAKE_BUILD_TYPE=Release
 cmake --build cpp_robot_core/build -j
@@ -107,6 +115,16 @@ or:
 ```bash
 uvicorn spine_ultrasound_ui.api_server:app --host 0.0.0.0 --port 8000
 ```
+
+## Environment doctor
+
+在进入真实 `robot_core + xCore SDK` 主线前，先执行：
+
+```bash
+python scripts/doctor_runtime.py
+```
+
+它会检查：Python/CMake/C++/Protobuf/OpenSSL、TLS runtime 目录、`XCORE_SDK_ROOT` / `ROKAE_SDK_ROOT`、以及 remote/local IP 与主线链路设置。
 
 ## Verification
 

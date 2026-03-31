@@ -3,27 +3,61 @@ project(SpineUltrasoundCore)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+option(ROBOT_CORE_WITH_XCORE_SDK "Enable direct xCore SDK integration hooks" ON)
+option(ROBOT_CORE_WITH_XMATE_MODEL "Enable xMateModel support when vendored SDK is available" ON)
+set(XCORE_SDK_ROOT "" CACHE PATH "Path to xCore SDK root")
+if(NOT XCORE_SDK_ROOT AND DEFINED ENV{XCORE_SDK_ROOT})
+  set(XCORE_SDK_ROOT "$ENV{XCORE_SDK_ROOT}" CACHE PATH "Path to xCore SDK root" FORCE)
+endif()
+if(NOT XCORE_SDK_ROOT AND DEFINED ENV{ROKAE_SDK_ROOT})
+  set(XCORE_SDK_ROOT "$ENV{ROKAE_SDK_ROOT}" CACHE PATH "Path to xCore SDK root" FORCE)
+endif()
+if(NOT XCORE_SDK_ROOT)
+  set(_VENDORED_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/rokae_xcore_sdk/robot")
+  if(EXISTS "${_VENDORED_SDK_ROOT}/include/rokae/robot.h")
+    set(XCORE_SDK_ROOT "${_VENDORED_SDK_ROOT}" CACHE PATH "Path to xCore SDK root" FORCE)
+  endif()
+endif()
 
 # Force optimizations for Real-Time Core
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -pthread")
 
-# Include directories
-include_directories(include)
-include_directories(${CMAKE_CURRENT_BINARY_DIR})  # For generated protobuf files
-include_directories(/usr/include/eigen3)
-
-# Find absolute dependencies for Zero-Copy and System Locking
 find_package(Threads REQUIRED)
 find_package(Protobuf REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(Eigen3 REQUIRED)
 enable_testing()
-add_compile_definitions(ROBOT_CORE_FORCE_CONTROL_CONFIG_PATH="${CMAKE_SOURCE_DIR}/../configs/force_control.json")
 
-# Protobuf generation
+if(ROBOT_CORE_WITH_XCORE_SDK)
+  find_package(VendoredRokaeSdk QUIET)
+  if(VendoredRokaeSdk_FOUND)
+    add_compile_definitions(ROBOT_CORE_WITH_XCORE_SDK=1)
+    if(ROBOT_CORE_WITH_XMATE_MODEL AND TARGET Rokae::xMateModel)
+      add_compile_definitions(ROBOT_CORE_WITH_XMATE_MODEL=1)
+    endif()
+  else()
+    message(WARNING "ROBOT_CORE_WITH_XCORE_SDK=ON but vendored SDK was not found. Falling back to simulated contract runtime.")
+  endif()
+endif()
+
+add_compile_definitions(
+  ROBOT_CORE_FORCE_CONTROL_CONFIG_PATH="${CMAKE_SOURCE_DIR}/../configs/force_control.json"
+  ROBOT_CORE_DEFAULT_ROBOT_MODEL="xmate3"
+  ROBOT_CORE_DEFAULT_SDK_CLASS="xMateRobot"
+)
+
+include_directories(include)
+include_directories(${CMAKE_CURRENT_BINARY_DIR})
+include_directories(/usr/include/eigen3)
+if(VendoredRokaeSdk_FOUND)
+  include_directories(${VendoredRokaeSdk_INCLUDE_DIR})
+  include_directories(${VendoredRokaeSdk_EXTERNAL_DIR})
+endif()
+
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS proto/ipc_messages.proto)
 
-# Source files mapping for the canonical spine_robot_core runtime.
 set(CORE_RUNTIME_SOURCES
     src/command_server.cpp
     src/core_runtime.cpp
@@ -49,26 +83,12 @@ set(CORE_RUNTIME_SOURCES
 )
 
 add_library(spine_robot_core_runtime STATIC ${CORE_RUNTIME_SOURCES})
-
-# Build the Hard-RT Executable
 add_executable(spine_robot_core src/main_ubuntu_rt.cpp)
-
-# Build test executable for Seqlock IPC
 add_executable(test_seqlock src/test_seqlock.cpp)
-
-# Build test executable for Force Control Safety System
 add_executable(test_force_control src/test_force_control.cpp)
-
-# Build test executable for Impedance Scan Controller
 add_executable(test_impedance_scan src/test_impedance_scan.cpp)
-
-# Build smoke test executable for protocol bridge
 add_executable(test_protocol_bridge src/test_protocol_bridge.cpp)
-
-# Build smoke test executable for recovery manager
 add_executable(test_recovery_manager src/test_recovery_manager.cpp)
-
-# Build example executable for Impedance Scan Controller
 add_executable(impedance_scan_example src/impedance_scan_example.cpp)
 
 target_link_libraries(spine_robot_core_runtime
@@ -77,8 +97,11 @@ target_link_libraries(spine_robot_core_runtime
     OpenSSL::SSL
     OpenSSL::Crypto
     rt
-    # rokae_xcore_sdk 
 )
+
+if(VendoredRokaeSdk_FOUND)
+  target_link_libraries(spine_robot_core_runtime PRIVATE Rokae::xCoreSDK)
+endif()
 
 target_link_libraries(spine_robot_core spine_robot_core_runtime)
 
@@ -113,5 +136,4 @@ add_test(NAME cpp_impedance_scan COMMAND test_impedance_scan)
 add_test(NAME cpp_protocol_bridge COMMAND test_protocol_bridge)
 add_test(NAME cpp_recovery_manager COMMAND test_recovery_manager)
 
-# Install location matching the systemd service template
 install(TARGETS spine_robot_core DESTINATION /opt/spine_ultrasound/cpp_robot_core/build)

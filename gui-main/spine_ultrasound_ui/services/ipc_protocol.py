@@ -50,6 +50,24 @@ COMMAND_SPECS: dict[str, dict[str, Any]] = {
         "state_preconditions": ["*"],
         "write_command": False,
     },
+    "get_identity_contract": {"required_payload_fields": [], "state_preconditions": ["*"], "write_command": False},
+    "get_clinical_mainline_contract": {"required_payload_fields": [], "state_preconditions": ["*"], "write_command": False},
+    "get_session_freeze": {"required_payload_fields": [], "state_preconditions": ["*"], "write_command": False},
+    "get_recovery_contract": {"required_payload_fields": [], "state_preconditions": ["*"], "write_command": False},
+    "get_capability_contract": {"required_payload_fields": [], "state_preconditions": ["*"], "write_command": False},
+    "get_model_authority_contract": {"required_payload_fields": [], "state_preconditions": ["*"], "write_command": False},
+    "get_release_contract": {"required_payload_fields": [], "state_preconditions": ["*"], "write_command": False},
+    "get_deployment_contract": {"required_payload_fields": [], "state_preconditions": ["*"], "write_command": False},
+    "get_fault_injection_contract": {"required_payload_fields": [], "state_preconditions": ["*"], "write_command": False},
+    "inject_fault": {
+        "required_payload_fields": ["fault_name"],
+        "field_types": {"fault_name": "string"},
+        "state_preconditions": ["*"],
+    },
+    "clear_injected_faults": {
+        "required_payload_fields": [],
+        "state_preconditions": ["*"],
+    },
     "lock_session": {
         "required_payload_fields": ["session_id", "session_dir", "config_snapshot", "device_roster", "scan_plan_hash"],
         "field_types": {

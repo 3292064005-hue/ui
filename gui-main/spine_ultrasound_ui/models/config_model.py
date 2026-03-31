@@ -31,7 +31,7 @@ class RuntimeConfig:
     remote_ip: str = "192.168.0.160"
     local_ip: str = "192.168.0.100"
     force_sensor_provider: str = "mock_force_sensor"
-    robot_model: str = "xmate_er3"
+    robot_model: str = "xmate3"
     axis_count: int = 6
     sdk_robot_class: str = "xMateRobot"
     preferred_link: str = "wired_direct"
@@ -52,7 +52,7 @@ class RuntimeConfig:
     rl_project_name: str = "spine_mainline"
     rl_task_name: str = "scan"
     xpanel_vout_mode: str = "off"
-    cartesian_impedance: List[float] = field(default_factory=lambda: [2200.0, 2200.0, 1400.0, 45.0, 45.0, 35.0])
+    cartesian_impedance: List[float] = field(default_factory=lambda: [1000.0, 1000.0, 1000.0, 80.0, 80.0, 80.0])
     desired_wrench_n: List[float] = field(default_factory=lambda: [0.0, 0.0, 8.0, 0.0, 0.0, 0.0])
     fc_frame_type: str = "path"
     fc_frame_matrix: List[float] = field(default_factory=lambda: [

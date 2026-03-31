@@ -6,6 +6,7 @@
 
 #include "json_utils.h"
 #include "robot_core/force_state.h"
+#include "robot_core/robot_identity_contract.h"
 #include "robot_core/safety_decision.h"
 
 namespace robot_core {
@@ -28,6 +29,9 @@ std::string stateName(RobotCoreState state) {
     case RobotCoreState::ContactStable: return "CONTACT_STABLE";
     case RobotCoreState::Scanning: return "SCANNING";
     case RobotCoreState::PausedHold: return "PAUSED_HOLD";
+    case RobotCoreState::RecoveryRetract: return "RECOVERY_RETRACT";
+    case RobotCoreState::SegmentAborted: return "SEGMENT_ABORTED";
+    case RobotCoreState::PlanAborted: return "PLAN_ABORTED";
     case RobotCoreState::Retreating: return "RETREATING";
     case RobotCoreState::ScanComplete: return "SCAN_COMPLETE";
     case RobotCoreState::Fault: return "FAULT";
@@ -68,6 +72,89 @@ std::string summaryEntry(const std::string& name, const std::string& detail) {
   });
 }
 
+std::string logEntryJson(const std::string& level, const std::string& source, const std::string& message) {
+  return json::object({
+      json::field("level", json::quote(level)),
+      json::field("source", json::quote(source)),
+      json::field("message", json::quote(message)),
+  });
+}
+
+std::string boolMapJson(const std::map<std::string, bool>& items) {
+  std::vector<std::string> fields;
+  for (const auto& [key, value] : items) {
+    fields.push_back(json::field(key, json::boolLiteral(value)));
+  }
+  return json::object(fields);
+}
+
+std::string doubleMapJson(const std::map<std::string, double>& items) {
+  std::vector<std::string> fields;
+  for (const auto& [key, value] : items) {
+    fields.push_back(json::field(key, json::formatDouble(value)));
+  }
+  return json::object(fields);
+}
+
+std::string intMapJson(const std::map<std::string, int>& items) {
+  std::vector<std::string> fields;
+  for (const auto& [key, value] : items) {
+    fields.push_back(json::field(key, std::to_string(value)));
+  }
+  return json::object(fields);
+}
+
+std::string projectArrayJson(const std::vector<SdkRobotProjectInfo>& projects) {
+  std::vector<std::string> entries;
+  for (const auto& project : projects) {
+    entries.push_back(json::object({
+        json::field("name", json::quote(project.name)),
+        json::field("tasks", json::stringArray(project.tasks)),
+    }));
+  }
+  return objectArray(entries);
+}
+
+std::string pathArrayJson(const std::vector<SdkRobotPathInfo>& paths) {
+  std::vector<std::string> entries;
+  for (const auto& path : paths) {
+    entries.push_back(json::object({
+        json::field("name", json::quote(path.name)),
+        json::field("rate", json::formatDouble(path.rate)),
+        json::field("points", std::to_string(path.points)),
+    }));
+  }
+  return objectArray(entries);
+}
+
+std::string vectorJson(const std::vector<double>& values) { return json::array(values); }
+
+std::string dhArrayJson(const std::vector<OfficialDhParameter>& params) {
+  std::vector<std::string> entries;
+  for (const auto& item : params) {
+    entries.push_back(json::object({
+        json::field("joint", std::to_string(item.joint)),
+        json::field("a_mm", json::formatDouble(item.a_mm)),
+        json::field("alpha_rad", json::formatDouble(item.alpha_rad, 4)),
+        json::field("d_mm", json::formatDouble(item.d_mm)),
+        json::field("theta_rad", json::formatDouble(item.theta_rad, 4)),
+    }));
+  }
+  return objectArray(entries);
+}
+
+std::vector<double> array6ToVector(const std::array<double, 6>& values) {
+  return std::vector<double>(values.begin(), values.end());
+}
+
+std::vector<double> array16ToVector(const std::array<double, 16>& values) {
+  return std::vector<double>(values.begin(), values.end());
+}
+
+std::vector<double> array3ToVector(const std::array<double, 3>& values) {
+  return std::vector<double>(values.begin(), values.end());
+}
+
 }  // namespace
 
 CoreRuntime::CoreRuntime() {
@@ -101,9 +188,14 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
     if (execution_state_ != RobotCoreState::Boot && execution_state_ != RobotCoreState::Disconnected) {
       return replyJson(request_id, false, "robot already connected");
     }
+    const auto remote_ip = json::extractString(line, "remote_ip", sdk_robot_.runtimeConfig().remote_ip);
+    const auto local_ip = json::extractString(line, "local_ip", sdk_robot_.runtimeConfig().local_ip);
+    if (!sdk_robot_.connect(remote_ip, local_ip)) {
+      return replyJson(request_id, false, "connect_robot failed");
+    }
     controller_online_ = true;
     execution_state_ = RobotCoreState::Connected;
-    devices_[0] = makeDevice("robot", true, "robot_core 已连接");
+    devices_[0] = makeDevice("robot", true, std::string("robot_core 已连接 / source=") + sdk_robot_.runtimeSource());
     devices_[1] = makeDevice("camera", true, "摄像头在线");
     devices_[2] = makeDevice("pressure", true, "压力传感器在线");
     devices_[3] = makeDevice("ultrasound", true, "超声设备在线");
@@ -111,6 +203,7 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
   }
   if (command == "disconnect_robot") {
     recording_service_.closeSession();
+    sdk_robot_.disconnect();
     execution_state_ = RobotCoreState::Disconnected;
     controller_online_ = false;
     powered_ = false;
@@ -126,6 +219,7 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
     session_dir_.clear();
     plan_id_.clear();
     plan_hash_.clear();
+    locked_scan_plan_hash_.clear();
     plan_loaded_ = false;
     total_points_ = 0;
     total_segments_ = 0;
@@ -143,6 +237,7 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
     pending_alarms_.clear();
     recovery_manager_.resetToIdle();
     last_final_verdict_ = FinalVerdict{};
+    injected_faults_.clear();
     devices_ = {
         makeDevice("robot", false, "机械臂控制器未连接"),
         makeDevice("camera", false, "摄像头未连接"),
@@ -155,11 +250,17 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
     if (!controller_online_) {
       return replyJson(request_id, false, "robot not connected");
     }
+    if (!sdk_robot_.setPower(true)) {
+      return replyJson(request_id, false, "power_on failed");
+    }
     powered_ = true;
     execution_state_ = RobotCoreState::Powered;
     return replyJson(request_id, true, "power_on accepted");
   }
   if (command == "power_off") {
+    if (controller_online_) {
+      sdk_robot_.setPower(false);
+    }
     powered_ = false;
     automatic_mode_ = false;
     execution_state_ = controller_online_ ? RobotCoreState::Connected : RobotCoreState::Disconnected;
@@ -169,11 +270,17 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
     if (!powered_) {
       return replyJson(request_id, false, "robot not powered");
     }
+    if (!sdk_robot_.setAutoMode()) {
+      return replyJson(request_id, false, "set_auto_mode failed");
+    }
     automatic_mode_ = true;
     execution_state_ = RobotCoreState::AutoReady;
     return replyJson(request_id, true, "set_auto_mode accepted");
   }
   if (command == "set_manual_mode") {
+    if (controller_online_) {
+      sdk_robot_.setManualMode();
+    }
     automatic_mode_ = false;
     execution_state_ = powered_ ? RobotCoreState::Powered : RobotCoreState::Connected;
     return replyJson(request_id, true, "set_manual_mode accepted");
@@ -197,6 +304,242 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
     const auto verdict_json = finalVerdictJson(last_final_verdict_);
     return replyJson(request_id, true, "final verdict snapshot", json::object({json::field("final_verdict", verdict_json)}));
   }
+  if (command == "query_controller_log") {
+    std::vector<std::string> entries;
+    for (const auto& item : sdk_robot_.controllerLogs()) {
+      entries.push_back(logEntryJson("INFO", "sdk", item));
+    }
+    return replyJson(request_id, true, "query_controller_log accepted", json::object({json::field("logs", objectArray(entries))}));
+  }
+  if (command == "query_rl_projects") {
+    const auto projects = projectArrayJson(sdk_robot_.rlProjects());
+    const auto rl_status = sdk_robot_.rlStatus();
+    const auto status = json::object({
+        json::field("loaded_project", json::quote(rl_status.loaded_project)),
+        json::field("loaded_task", json::quote(rl_status.loaded_task)),
+        json::field("running", json::boolLiteral(rl_status.running)),
+        json::field("rate", json::formatDouble(rl_status.rate)),
+        json::field("loop", json::boolLiteral(rl_status.loop)),
+    });
+    return replyJson(request_id, true, "query_rl_projects accepted", json::object({json::field("projects", projects), json::field("status", status)}));
+  }
+  if (command == "query_path_lists") {
+    const auto paths = pathArrayJson(sdk_robot_.pathLibrary());
+    const auto drag_state = sdk_robot_.dragState();
+    const auto drag = json::object({
+        json::field("enabled", json::boolLiteral(drag_state.enabled)),
+        json::field("space", json::quote(drag_state.space)),
+        json::field("type", json::quote(drag_state.type)),
+    });
+    return replyJson(request_id, true, "query_path_lists accepted", json::object({json::field("paths", paths), json::field("drag", drag)}));
+  }
+  if (command == "get_io_snapshot") {
+    const auto data = json::object({
+        json::field("di", boolMapJson(sdk_robot_.di())),
+        json::field("do", boolMapJson(sdk_robot_.doState())),
+        json::field("ai", doubleMapJson(sdk_robot_.ai())),
+        json::field("ao", doubleMapJson(sdk_robot_.ao())),
+        json::field("registers", intMapJson(sdk_robot_.registers())),
+        json::field("xpanel_vout_mode", json::quote(config_.xpanel_vout_mode)),
+    });
+    return replyJson(request_id, true, "get_io_snapshot accepted", data);
+  }
+  if (command == "get_register_snapshot") {
+    const auto data = json::object({
+        json::field("registers", intMapJson(sdk_robot_.registers())),
+        json::field("session_id", json::quote(session_id_)),
+        json::field("plan_hash", json::quote(plan_hash_))
+    });
+    return replyJson(request_id, true, "get_register_snapshot accepted", data);
+  }
+  if (command == "get_safety_config") {
+    const auto data = json::object({
+        json::field("collision_detection_enabled", json::boolLiteral(config_.collision_detection_enabled)),
+        json::field("collision_sensitivity", std::to_string(config_.collision_sensitivity)),
+        json::field("collision_behavior", json::quote(config_.collision_behavior)),
+        json::field("collision_fallback_mm", json::formatDouble(config_.collision_fallback_mm)),
+        json::field("soft_limit_enabled", json::boolLiteral(config_.soft_limit_enabled)),
+        json::field("joint_soft_limit_margin_deg", json::formatDouble(config_.joint_soft_limit_margin_deg)),
+        json::field("singularity_avoidance_enabled", json::boolLiteral(config_.singularity_avoidance_enabled))
+    });
+    return replyJson(request_id, true, "get_safety_config accepted", data);
+  }
+  if (command == "get_motion_contract") {
+    const auto runtime_cfg = sdk_robot_.runtimeConfig();
+    const auto identity = resolveRobotIdentity(runtime_cfg.robot_model, runtime_cfg.sdk_robot_class, runtime_cfg.axis_count);
+    const auto data = json::object({
+        json::field("rt_mode", json::quote(config_.rt_mode)),
+        json::field("clinical_mainline_mode", json::quote(identity.clinical_mainline_mode)),
+        json::field("network_tolerance_percent", std::to_string(runtime_cfg.rt_network_tolerance_percent)),
+        json::field("preferred_link", json::quote(runtime_cfg.preferred_link)),
+        json::field("collision_behavior", json::quote(config_.collision_behavior)),
+        json::field("collision_detection_enabled", json::boolLiteral(config_.collision_detection_enabled)),
+        json::field("soft_limit_enabled", json::boolLiteral(config_.soft_limit_enabled)),
+        json::field("single_control_source_required", json::boolLiteral(runtime_cfg.requires_single_control_source)),
+        json::field("clinical_allowed_modes", json::stringArray(identity.clinical_allowed_modes)),
+        json::field("cartesian_impedance", vectorJson(config_.cartesian_impedance)),
+        json::field("desired_wrench_n", vectorJson(config_.desired_wrench_n)),
+        json::field("filters", json::object({
+            json::field("joint_hz", json::formatDouble(runtime_cfg.joint_filter_hz)),
+            json::field("cart_hz", json::formatDouble(runtime_cfg.cart_filter_hz)),
+            json::field("torque_hz", json::formatDouble(runtime_cfg.torque_filter_hz))
+        }))
+    });
+    return replyJson(request_id, true, "get_motion_contract accepted", data);
+  }
+  if (command == "get_runtime_alignment") {
+    const auto runtime_cfg = sdk_robot_.runtimeConfig();
+    const auto identity = resolveRobotIdentity(runtime_cfg.robot_model, runtime_cfg.sdk_robot_class, runtime_cfg.axis_count);
+    const auto data = json::object({
+        json::field("sdk_family", json::quote("ROKAE xCore SDK (C++)")),
+        json::field("robot_model", json::quote(identity.robot_model)),
+        json::field("sdk_robot_class", json::quote(identity.sdk_robot_class)),
+        json::field("axis_count", std::to_string(identity.axis_count)),
+        json::field("controller_series", json::quote(identity.controller_series)),
+        json::field("controller_version", json::quote(identity.controller_version)),
+        json::field("remote_ip", json::quote(runtime_cfg.remote_ip)),
+        json::field("local_ip", json::quote(runtime_cfg.local_ip)),
+        json::field("preferred_link", json::quote(runtime_cfg.preferred_link)),
+        json::field("rt_mode", json::quote(config_.rt_mode)),
+        json::field("single_control_source", json::boolLiteral(runtime_cfg.requires_single_control_source)),
+        json::field("sdk_available", json::boolLiteral(sdk_robot_.sdkAvailable())),
+        json::field("source", json::quote(sdk_robot_.runtimeSource()))
+    });
+    return replyJson(request_id, true, "get_runtime_alignment accepted", data);
+  }
+  if (command == "get_xmate_model_summary") {
+    const auto runtime_cfg = sdk_robot_.runtimeConfig();
+    const auto identity = resolveRobotIdentity(runtime_cfg.robot_model, runtime_cfg.sdk_robot_class, runtime_cfg.axis_count);
+    const auto data = json::object({
+        json::field("robot_model", json::quote(identity.robot_model)),
+        json::field("label", json::quote(identity.label)),
+        json::field("sdk_robot_class", json::quote(identity.sdk_robot_class)),
+        json::field("axis_count", std::to_string(identity.axis_count)),
+        json::field("supported_rt_modes", json::stringArray(identity.supported_rt_modes)),
+        json::field("clinical_mainline_mode", json::quote(identity.clinical_mainline_mode)),
+        json::field("supports_planner", json::boolLiteral(identity.supports_planner)),
+        json::field("supports_xmate_model", json::boolLiteral(identity.supports_xmate_model)),
+        json::field("approximate", json::boolLiteral(!(sdk_robot_.xmateModelAvailable() && identity.supports_xmate_model))),
+        json::field("source", json::quote(sdk_robot_.runtimeSource())),
+        json::field("dh_parameters", dhArrayJson(identity.official_dh_parameters))
+    });
+    return replyJson(request_id, true, "get_xmate_model_summary accepted", data);
+  }
+  if (command == "get_sdk_runtime_config") {
+    const auto runtime_cfg = sdk_robot_.runtimeConfig();
+    const auto data = json::object({
+        json::field("robot_model", json::quote(runtime_cfg.robot_model)),
+        json::field("sdk_robot_class", json::quote(runtime_cfg.sdk_robot_class)),
+        json::field("remote_ip", json::quote(runtime_cfg.remote_ip)),
+        json::field("local_ip", json::quote(runtime_cfg.local_ip)),
+        json::field("axis_count", std::to_string(runtime_cfg.axis_count)),
+        json::field("rt_network_tolerance_percent", std::to_string(runtime_cfg.rt_network_tolerance_percent)),
+        json::field("joint_filter_hz", json::formatDouble(runtime_cfg.joint_filter_hz)),
+        json::field("cart_filter_hz", json::formatDouble(runtime_cfg.cart_filter_hz)),
+        json::field("torque_filter_hz", json::formatDouble(runtime_cfg.torque_filter_hz)),
+        json::field("fc_frame_type", json::quote(config_.fc_frame_type)),
+        json::field("cartesian_impedance", vectorJson(array6ToVector(runtime_cfg.cartesian_impedance))),
+        json::field("desired_wrench_n", vectorJson(array6ToVector(runtime_cfg.desired_wrench_n))),
+        json::field("fc_frame_matrix", vectorJson(array16ToVector(runtime_cfg.fc_frame_matrix))),
+        json::field("tcp_frame_matrix", vectorJson(array16ToVector(runtime_cfg.tcp_frame_matrix))),
+        json::field("load_com_mm", vectorJson(array3ToVector(runtime_cfg.load_com_mm))),
+        json::field("load_inertia", vectorJson(array6ToVector(runtime_cfg.load_inertia)))
+    });
+    return replyJson(request_id, true, "get_sdk_runtime_config accepted", data);
+  }
+  if (command == "get_identity_contract") {
+    const auto runtime_cfg = sdk_robot_.runtimeConfig();
+    const auto identity = resolveRobotIdentity(runtime_cfg.robot_model, runtime_cfg.sdk_robot_class, runtime_cfg.axis_count);
+    const auto data = json::object({
+        json::field("robot_model", json::quote(identity.robot_model)),
+        json::field("label", json::quote(identity.label)),
+        json::field("sdk_robot_class", json::quote(identity.sdk_robot_class)),
+        json::field("axis_count", std::to_string(identity.axis_count)),
+        json::field("controller_series", json::quote(identity.controller_series)),
+        json::field("controller_version", json::quote(identity.controller_version)),
+        json::field("preferred_link", json::quote(identity.preferred_link)),
+        json::field("clinical_mainline_mode", json::quote(identity.clinical_mainline_mode)),
+        json::field("supported_rt_modes", json::stringArray(identity.supported_rt_modes)),
+        json::field("clinical_allowed_modes", json::stringArray(identity.clinical_allowed_modes)),
+        json::field("cartesian_impedance_limits", vectorJson(identity.cartesian_impedance_limits)),
+        json::field("desired_wrench_limits", vectorJson(identity.desired_wrench_limits)),
+        json::field("official_dh_parameters", dhArrayJson(identity.official_dh_parameters))
+    });
+    return replyJson(request_id, true, "get_identity_contract accepted", data);
+  }
+  if (command == "get_clinical_mainline_contract") {
+    const auto runtime_cfg = sdk_robot_.runtimeConfig();
+    const auto identity = resolveRobotIdentity(runtime_cfg.robot_model, runtime_cfg.sdk_robot_class, runtime_cfg.axis_count);
+    const auto data = json::object({
+        json::field("robot_model", json::quote(identity.robot_model)),
+        json::field("clinical_mainline_mode", json::quote(identity.clinical_mainline_mode)),
+        json::field("required_sequence", json::stringArray({"connect_robot", "power_on", "set_auto_mode", "lock_session", "load_scan_plan", "approach_prescan", "seek_contact", "start_scan", "safe_retreat"})),
+        json::field("single_control_source_required", json::boolLiteral(identity.requires_single_control_source)),
+        json::field("preferred_link", json::quote(identity.preferred_link)),
+        json::field("rt_loop_hz", std::to_string(1000)),
+        json::field("cartesian_impedance_limits", vectorJson(identity.cartesian_impedance_limits)),
+        json::field("desired_wrench_limits", vectorJson(identity.desired_wrench_limits))
+    });
+    return replyJson(request_id, true, "get_clinical_mainline_contract accepted", data);
+  }
+  if (command == "get_session_freeze") {
+    const auto data = json::object({
+        json::field("session_locked", json::boolLiteral(!session_id_.empty())),
+        json::field("session_id", json::quote(session_id_)),
+        json::field("session_dir", json::quote(session_dir_)),
+        json::field("locked_at_ns", std::to_string(session_locked_ts_ns_)),
+        json::field("plan_hash", json::quote(plan_hash_)),
+        json::field("active_segment", std::to_string(active_segment_)),
+        json::field("tool_name", json::quote(config_.tool_name)),
+        json::field("tcp_name", json::quote(config_.tcp_name)),
+        json::field("load_kg", json::formatDouble(config_.load_kg)),
+        json::field("rt_mode", json::quote(config_.rt_mode)),
+        json::field("cartesian_impedance", vectorJson(config_.cartesian_impedance)),
+        json::field("desired_wrench_n", vectorJson(config_.desired_wrench_n))
+    });
+    return replyJson(request_id, true, "get_session_freeze accepted", data);
+  }
+  if (command == "get_recovery_contract") {
+    const auto data = json::object({
+        json::field("collision_behavior", json::quote(config_.collision_behavior)),
+        json::field("pause_resume_enabled", json::boolLiteral(true)),
+        json::field("safe_retreat_enabled", json::boolLiteral(true)),
+        json::field("resume_force_band_n", json::formatDouble(force_limits_.resume_force_band_n)),
+        json::field("warning_z_force_n", json::formatDouble(force_limits_.warning_z_force_n)),
+        json::field("max_z_force_n", json::formatDouble(force_limits_.max_z_force_n)),
+        json::field("sensor_timeout_ms", json::formatDouble(force_limits_.sensor_timeout_ms)),
+        json::field("stale_telemetry_ms", json::formatDouble(force_limits_.stale_telemetry_ms)),
+        json::field("emergency_retract_mm", json::formatDouble(force_limits_.emergency_retract_mm))
+    });
+    return replyJson(request_id, true, "get_recovery_contract accepted", data);
+  }
+  if (command == "get_capability_contract") {
+    return replyJson(request_id, true, "get_capability_contract accepted", capabilityContractJsonLocked());
+  }
+  if (command == "get_model_authority_contract") {
+    return replyJson(request_id, true, "get_model_authority_contract accepted", modelAuthorityContractJsonLocked());
+  }
+  if (command == "get_release_contract") {
+    return replyJson(request_id, true, "get_release_contract accepted", releaseContractJsonLocked());
+  }
+  if (command == "get_deployment_contract") {
+    return replyJson(request_id, true, "get_deployment_contract accepted", deploymentContractJsonLocked());
+  }
+  if (command == "get_fault_injection_contract") {
+    return replyJson(request_id, true, "get_fault_injection_contract accepted", faultInjectionContractJsonLocked());
+  }
+  if (command == "inject_fault") {
+    const auto fault_name = json::extractString(line, "fault_name");
+    std::string error_message;
+    if (!applyFaultInjectionLocked(fault_name, &error_message)) {
+      return replyJson(request_id, false, error_message.empty() ? "fault injection failed" : error_message);
+    }
+    return replyJson(request_id, true, "inject_fault accepted", faultInjectionContractJsonLocked());
+  }
+  if (command == "clear_injected_faults") {
+    clearInjectedFaultsLocked();
+    return replyJson(request_id, true, "clear_injected_faults accepted", faultInjectionContractJsonLocked());
+  }
   if (command == "lock_session") {
     if (execution_state_ != RobotCoreState::AutoReady) {
       return replyJson(request_id, false, "core not ready for session lock");
@@ -206,12 +549,46 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
     if (session_id_.empty() || session_dir_.empty()) {
       return replyJson(request_id, false, "session_id or session_dir missing");
     }
+    locked_scan_plan_hash_ = json::extractString(line, "scan_plan_hash");
     applyConfigFromJsonLocked(line);
     tool_ready_ = !config_.tool_name.empty();
     tcp_ready_ = !config_.tcp_name.empty();
     load_ready_ = config_.load_kg > 0.0;
+    std::vector<std::string> session_blockers;
+    std::vector<std::string> session_warnings;
+    appendMainlineContractIssuesLocked(&session_blockers, &session_warnings);
+    if (!session_blockers.empty()) {
+      session_id_.clear();
+      session_dir_.clear();
+      locked_scan_plan_hash_.clear();
+      return replyJson(request_id, false, session_blockers.front());
+    }
+    auto runtime_cfg = sdk_robot_.runtimeConfig();
+    const auto identity = resolveRobotIdentity(config_.robot_model, config_.sdk_robot_class, config_.axis_count);
+    runtime_cfg.robot_model = identity.robot_model;
+    runtime_cfg.sdk_robot_class = identity.sdk_robot_class;
+    runtime_cfg.preferred_link = config_.preferred_link.empty() ? identity.preferred_link : config_.preferred_link;
+    runtime_cfg.requires_single_control_source = config_.requires_single_control_source;
+    runtime_cfg.clinical_mainline_mode = identity.clinical_mainline_mode;
+    runtime_cfg.remote_ip = config_.remote_ip;
+    runtime_cfg.local_ip = config_.local_ip;
+    runtime_cfg.axis_count = identity.axis_count;
+    runtime_cfg.rt_network_tolerance_percent = config_.rt_network_tolerance_percent;
+    runtime_cfg.joint_filter_hz = config_.joint_filter_hz;
+    runtime_cfg.cart_filter_hz = config_.cart_filter_hz;
+    runtime_cfg.torque_filter_hz = config_.torque_filter_hz;
+    for (std::size_t idx = 0; idx < std::min<std::size_t>(6, config_.cartesian_impedance.size()); ++idx) runtime_cfg.cartesian_impedance[idx] = config_.cartesian_impedance[idx];
+    for (std::size_t idx = 0; idx < std::min<std::size_t>(6, config_.desired_wrench_n.size()); ++idx) runtime_cfg.desired_wrench_n[idx] = config_.desired_wrench_n[idx];
+    for (std::size_t idx = 0; idx < std::min<std::size_t>(16, config_.fc_frame_matrix.size()); ++idx) runtime_cfg.fc_frame_matrix[idx] = config_.fc_frame_matrix[idx];
+    for (std::size_t idx = 0; idx < std::min<std::size_t>(16, config_.tcp_frame_matrix.size()); ++idx) runtime_cfg.tcp_frame_matrix[idx] = config_.tcp_frame_matrix[idx];
+    for (std::size_t idx = 0; idx < std::min<std::size_t>(3, config_.load_com_mm.size()); ++idx) runtime_cfg.load_com_mm[idx] = config_.load_com_mm[idx];
+    for (std::size_t idx = 0; idx < std::min<std::size_t>(6, config_.load_inertia.size()); ++idx) runtime_cfg.load_inertia[idx] = config_.load_inertia[idx];
+    sdk_robot_.configureRtMainline(runtime_cfg);
+    sdk_robot_.setRlStatus(config_.rl_project_name, config_.rl_task_name, false);
+    sdk_robot_.setDragState(false, "cartesian", "admittance");
     std::filesystem::create_directories(session_dir_);
     recording_service_.openSession(session_dir_, session_id_);
+    session_locked_ts_ns_ = json::nowNs();
     execution_state_ = RobotCoreState::SessionLocked;
     return replyJson(request_id, true, "lock_session accepted", json::object({json::field("session_id", json::quote(session_id_))}));
   }
@@ -223,6 +600,12 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
     loadPlanFromJsonLocked(line);
     if (!plan_loaded_) {
       return replyJson(request_id, false, "scan plan missing segments");
+    }
+    if (!locked_scan_plan_hash_.empty() && !plan_hash_.empty() && locked_scan_plan_hash_ != plan_hash_) {
+      plan_loaded_ = false;
+      execution_state_ = RobotCoreState::SessionLocked;
+      state_reason_ = "plan_hash_mismatch";
+      return replyJson(request_id, false, "locked scan_plan_hash does not match loaded plan");
     }
     execution_state_ = RobotCoreState::PathValidated;
     state_reason_ = "scan_plan_validated";
@@ -271,6 +654,7 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
       return replyJson(request_id, false, "start_scan failed");
     }
     execution_state_ = RobotCoreState::Scanning;
+    sdk_robot_.setRlStatus(config_.rl_project_name, config_.rl_task_name, true);
     state_reason_ = "scan_active";
     contact_state_.mode = "STABLE_CONTACT";
     contact_state_.recommended_action = "SCAN";
@@ -282,6 +666,7 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
     }
     rt_motion_service_.pauseAndHold();
     recovery_manager_.pauseAndHold();
+    sdk_robot_.setRlStatus(config_.rl_project_name, config_.rl_task_name, false);
     execution_state_ = RobotCoreState::PausedHold;
     state_reason_ = "pause_hold";
     contact_state_.mode = "HOLDING_CONTACT";
@@ -296,7 +681,9 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
       return replyJson(request_id, false, "resume_scan failed");
     }
     recovery_manager_.cancelRetry();
+    sdk_robot_.setRlStatus(config_.rl_project_name, config_.rl_task_name, true);
     execution_state_ = RobotCoreState::Scanning;
+    sdk_robot_.setRlStatus(config_.rl_project_name, config_.rl_task_name, true);
     state_reason_ = "scan_active";
     contact_state_.mode = "STABLE_CONTACT";
     contact_state_.recommended_action = "SCAN";
@@ -309,6 +696,7 @@ std::string CoreRuntime::handleCommandJson(const std::string& line) {
     rt_motion_service_.controlledRetract();
     nrt_motion_service_.safeRetreat();
     recovery_manager_.controlledRetract();
+    sdk_robot_.setRlStatus(config_.rl_project_name, config_.rl_task_name, false);
     execution_state_ = RobotCoreState::Retreating;
     state_reason_ = "safe_retreat";
     retreat_ticks_remaining_ = 30;
@@ -376,33 +764,12 @@ void CoreRuntime::statePollStep() {
   std::lock_guard<std::mutex> lock(mutex_);
   RobotStateSnapshot snapshot;
   snapshot.timestamp_ns = json::nowNs();
-  snapshot.power_state = powered_ ? "on" : "off";
-  snapshot.operate_mode = automatic_mode_ ? "automatic" : "manual";
+  snapshot.power_state = sdk_robot_.powered() ? "on" : "off";
+  snapshot.operate_mode = sdk_robot_.automaticMode() ? "automatic" : "manual";
   snapshot.operation_state = stateName(execution_state_);
-  snapshot.joint_pos = {
-      std::sin(phase_ * 0.4 + 0.0),
-      std::sin(phase_ * 0.4 + 0.2),
-      std::sin(phase_ * 0.4 + 0.4),
-      std::sin(phase_ * 0.4 + 0.6),
-      std::sin(phase_ * 0.4 + 0.8),
-      std::sin(phase_ * 0.4 + 1.0),
-  };
-  snapshot.joint_vel = {
-      0.08 * std::cos(phase_ * 0.3 + 0.0),
-      0.08 * std::cos(phase_ * 0.3 + 0.2),
-      0.08 * std::cos(phase_ * 0.3 + 0.4),
-      0.08 * std::cos(phase_ * 0.3 + 0.6),
-      0.08 * std::cos(phase_ * 0.3 + 0.8),
-      0.08 * std::cos(phase_ * 0.3 + 1.0),
-  };
-  snapshot.joint_torque = {
-      0.45 * std::sin(phase_ * 0.2 + 0.0),
-      0.45 * std::sin(phase_ * 0.2 + 0.2),
-      0.45 * std::sin(phase_ * 0.2 + 0.4),
-      0.45 * std::sin(phase_ * 0.2 + 0.6),
-      0.45 * std::sin(phase_ * 0.2 + 0.8),
-      0.45 * std::sin(phase_ * 0.2 + 1.0),
-  };
+  snapshot.joint_pos = sdk_robot_.jointPos();
+  snapshot.joint_vel = sdk_robot_.jointVel();
+  snapshot.joint_torque = sdk_robot_.jointTorque();
   const double z_base = execution_state_ == RobotCoreState::Approaching
                             ? 220.0
                             : (execution_state_ == RobotCoreState::Retreating ? 230.0
@@ -412,14 +779,12 @@ void CoreRuntime::statePollStep() {
                                                                                           execution_state_ == RobotCoreState::PausedHold
                                                                                       ? 205.0
                                                                                       : 240.0));
-  snapshot.tcp_pose = {
-      118.0 + 8.0 * std::sin(phase_ * 0.2),
-      15.0 + 5.0 * std::cos(phase_ * 0.25),
-      z_base + 2.5 * std::sin(phase_ * 0.33),
-      180.0,
-      0.3 * std::sin(phase_),
-      90.0,
-  };
+  snapshot.tcp_pose = sdk_robot_.tcpPose();
+  if (snapshot.tcp_pose.size() >= 6) {
+    snapshot.tcp_pose[0] = 118.0 + 8.0 * std::sin(phase_ * 0.2);
+    snapshot.tcp_pose[1] = 15.0 + 5.0 * std::cos(phase_ * 0.25);
+    snapshot.tcp_pose[2] = z_base + 2.5 * std::sin(phase_ * 0.33);
+  }
   snapshot.cart_force = {0.02, 0.01, pressure_current_, 0.0, 0.0, 0.0};
   snapshot.last_event = stateName(execution_state_);
   snapshot.last_controller_log = fault_code_.empty() ? "-" : fault_code_;
@@ -438,12 +803,22 @@ void CoreRuntime::watchdogStep() {
       config_.pressure_target);
   const auto decision = decideSafetyAction(force_state);
   const auto recovery_decision = recovery_policy_.evaluate(pressure_current_, config_.pressure_target, config_.pressure_upper, pressure_fresh_ ? 0.0 : static_cast<double>(config_.pressure_stale_ms));
+  if (injected_faults_.count("rt_jitter_high") > 0) {
+    rt_jitter_ok_ = false;
+  }
+  if (injected_faults_.count("pressure_stale") > 0) {
+    pressure_fresh_ = false;
+  }
+  if (injected_faults_.count("overpressure") > 0 && execution_state_ == RobotCoreState::Scanning) {
+    pressure_current_ = std::max(config_.pressure_upper + 0.5, force_limits_.max_z_force_n + 0.5);
+  }
   if (decision == SafetyDecision::WarnOnly && execution_state_ == RobotCoreState::Scanning) {
     queueAlarmLocked("WARN", "force_monitor", "力控接近告警阈值", "force_monitor", "", "warn_only");
   }
   if (pressure_current_ > config_.pressure_upper && execution_state_ == RobotCoreState::Scanning) {
     rt_motion_service_.pauseAndHold();
     recovery_manager_.pauseAndHold();
+    sdk_robot_.setRlStatus(config_.rl_project_name, config_.rl_task_name, false);
     execution_state_ = RobotCoreState::PausedHold;
     contact_state_.mode = "OVERPRESSURE";
     contact_state_.recommended_action = "CONTROLLED_RETRACT";
@@ -452,6 +827,7 @@ void CoreRuntime::watchdogStep() {
   if (decision == SafetyDecision::ControlledRetract && execution_state_ != RobotCoreState::Estop) {
     rt_motion_service_.controlledRetract();
     recovery_manager_.controlledRetract();
+    sdk_robot_.setRlStatus(config_.rl_project_name, config_.rl_task_name, false);
     execution_state_ = RobotCoreState::Retreating;
     queueAlarmLocked("RECOVERABLE_FAULT", "force_monitor", "力控进入受控退让", "force_monitor", "", "controlled_retract");
   }
@@ -515,7 +891,7 @@ void CoreRuntime::updateContactAndProgressLocked() {
     return;
   }
   if (execution_state_ == RobotCoreState::ContactStable) {
-    pressure_current_ = config_.pressure_target;
+    pressure_current_ = injected_faults_.count("overpressure") > 0 ? std::max(config_.pressure_upper + 0.5, force_limits_.max_z_force_n + 0.5) : config_.pressure_target;
     contact_state_.mode = "STABLE_CONTACT";
     contact_state_.confidence = 0.83;
     contact_state_.pressure_current = pressure_current_;
@@ -534,12 +910,14 @@ void CoreRuntime::updateContactAndProgressLocked() {
       const int points_per_segment = std::max(total_points_ / total_segments_, 1);
       active_segment_ = std::min(total_segments_, std::max(1, path_index_ / points_per_segment + 1));
     }
-    pressure_current_ = config_.pressure_target + 0.08 * std::sin(phase_);
+    sdk_robot_.updateSessionRegisters(active_segment_, frame_id_);
+    pressure_current_ = injected_faults_.count("overpressure") > 0 ? std::max(config_.pressure_upper + 0.5, force_limits_.max_z_force_n + 0.5) : (config_.pressure_target + 0.08 * std::sin(phase_));
     contact_state_.mode = "STABLE_CONTACT";
     contact_state_.confidence = 0.87;
     contact_state_.pressure_current = pressure_current_;
     contact_state_.recommended_action = "SCAN";
     if (progress_pct_ >= 100.0) {
+      sdk_robot_.setRlStatus(config_.rl_project_name, config_.rl_task_name, false);
       execution_state_ = RobotCoreState::ScanComplete;
       contact_state_.mode = "NO_CONTACT";
       contact_state_.recommended_action = "POSTPROCESS";
@@ -556,6 +934,7 @@ void CoreRuntime::updateContactAndProgressLocked() {
   }
   if (execution_state_ == RobotCoreState::Retreating) {
     pressure_current_ = 0.0;
+    sdk_robot_.updateSessionRegisters(active_segment_, frame_id_);
     contact_state_.mode = "NO_CONTACT";
     contact_state_.confidence = 0.0;
     contact_state_.pressure_current = 0.0;
@@ -666,21 +1045,67 @@ void CoreRuntime::recordStreamsLocked() {
 }
 
 void CoreRuntime::applyConfigFromJsonLocked(const std::string& json_line) {
-  config_.pressure_target = json::extractDouble(json_line, "pressure_target", config_.pressure_target);
-  config_.pressure_upper = json::extractDouble(json_line, "pressure_upper", config_.pressure_upper);
-  config_.pressure_lower = json::extractDouble(json_line, "pressure_lower", config_.pressure_lower);
-  config_.scan_speed_mm_s = json::extractDouble(json_line, "scan_speed_mm_s", config_.scan_speed_mm_s);
-  config_.sample_step_mm = json::extractDouble(json_line, "sample_step_mm", config_.sample_step_mm);
-  config_.segment_length_mm = json::extractDouble(json_line, "segment_length_mm", config_.segment_length_mm);
-  config_.contact_seek_speed_mm_s = json::extractDouble(json_line, "contact_seek_speed_mm_s", config_.contact_seek_speed_mm_s);
-  config_.retreat_speed_mm_s = json::extractDouble(json_line, "retreat_speed_mm_s", config_.retreat_speed_mm_s);
-  config_.network_stale_ms = json::extractInt(json_line, "network_stale_ms", config_.network_stale_ms);
-  config_.pressure_stale_ms = json::extractInt(json_line, "pressure_stale_ms", config_.pressure_stale_ms);
-  config_.telemetry_rate_hz = json::extractInt(json_line, "telemetry_rate_hz", config_.telemetry_rate_hz);
-  config_.tool_name = json::extractString(json_line, "tool_name", config_.tool_name);
-  config_.tcp_name = json::extractString(json_line, "tcp_name", config_.tcp_name);
-  config_.load_kg = json::extractDouble(json_line, "load_kg", config_.load_kg);
-  config_.rt_mode = json::extractString(json_line, "rt_mode", config_.rt_mode);
+  const auto config_json = json::extractObject(json_line, "config_snapshot", "{}");
+  const auto& source = config_json != "{}" ? config_json : json_line;
+  config_.pressure_target = json::extractDouble(source, "pressure_target", config_.pressure_target);
+  config_.pressure_upper = json::extractDouble(source, "pressure_upper", config_.pressure_upper);
+  config_.pressure_lower = json::extractDouble(source, "pressure_lower", config_.pressure_lower);
+  config_.scan_speed_mm_s = json::extractDouble(source, "scan_speed_mm_s", config_.scan_speed_mm_s);
+  config_.sample_step_mm = json::extractDouble(source, "sample_step_mm", config_.sample_step_mm);
+  config_.segment_length_mm = json::extractDouble(source, "segment_length_mm", config_.segment_length_mm);
+  config_.strip_width_mm = json::extractDouble(source, "strip_width_mm", config_.strip_width_mm);
+  config_.strip_overlap_mm = json::extractDouble(source, "strip_overlap_mm", config_.strip_overlap_mm);
+  config_.contact_seek_speed_mm_s = json::extractDouble(source, "contact_seek_speed_mm_s", config_.contact_seek_speed_mm_s);
+  config_.retreat_speed_mm_s = json::extractDouble(source, "retreat_speed_mm_s", config_.retreat_speed_mm_s);
+  config_.image_quality_threshold = json::extractDouble(source, "image_quality_threshold", config_.image_quality_threshold);
+  config_.smoothing_factor = json::extractDouble(source, "smoothing_factor", config_.smoothing_factor);
+  config_.reconstruction_step = json::extractDouble(source, "reconstruction_step", config_.reconstruction_step);
+  config_.feature_threshold = json::extractDouble(source, "feature_threshold", config_.feature_threshold);
+  config_.roi_mode = json::extractString(source, "roi_mode", config_.roi_mode);
+  config_.network_stale_ms = json::extractInt(source, "network_stale_ms", config_.network_stale_ms);
+  config_.pressure_stale_ms = json::extractInt(source, "pressure_stale_ms", config_.pressure_stale_ms);
+  config_.telemetry_rate_hz = json::extractInt(source, "telemetry_rate_hz", config_.telemetry_rate_hz);
+  config_.tool_name = json::extractString(source, "tool_name", config_.tool_name);
+  config_.tcp_name = json::extractString(source, "tcp_name", config_.tcp_name);
+  config_.load_kg = json::extractDouble(source, "load_kg", config_.load_kg);
+  config_.rt_mode = json::extractString(source, "rt_mode", config_.rt_mode);
+  config_.remote_ip = json::extractString(source, "remote_ip", config_.remote_ip);
+  config_.local_ip = json::extractString(source, "local_ip", config_.local_ip);
+  config_.force_sensor_provider = json::extractString(source, "force_sensor_provider", config_.force_sensor_provider);
+  config_.robot_model = json::extractString(source, "robot_model", config_.robot_model);
+  config_.axis_count = std::max(1, json::extractInt(source, "axis_count", config_.axis_count));
+  config_.sdk_robot_class = json::extractString(source, "sdk_robot_class", config_.sdk_robot_class);
+  config_.preferred_link = json::extractString(source, "preferred_link", config_.preferred_link);
+  config_.requires_single_control_source = json::extractBool(source, "requires_single_control_source", config_.requires_single_control_source);
+  config_.build_id = json::extractString(source, "build_id", config_.build_id);
+  config_.software_version = json::extractString(source, "software_version", config_.software_version);
+  config_.rt_network_tolerance_percent = json::extractInt(source, "rt_network_tolerance_percent", config_.rt_network_tolerance_percent);
+  config_.joint_filter_hz = json::extractDouble(source, "joint_filter_hz", config_.joint_filter_hz);
+  config_.cart_filter_hz = json::extractDouble(source, "cart_filter_hz", config_.cart_filter_hz);
+  config_.torque_filter_hz = json::extractDouble(source, "torque_filter_hz", config_.torque_filter_hz);
+  config_.collision_detection_enabled = json::extractBool(source, "collision_detection_enabled", config_.collision_detection_enabled);
+  config_.collision_sensitivity = json::extractInt(source, "collision_sensitivity", config_.collision_sensitivity);
+  config_.collision_behavior = json::extractString(source, "collision_behavior", config_.collision_behavior);
+  config_.collision_fallback_mm = json::extractDouble(source, "collision_fallback_mm", config_.collision_fallback_mm);
+  config_.soft_limit_enabled = json::extractBool(source, "soft_limit_enabled", config_.soft_limit_enabled);
+  config_.joint_soft_limit_margin_deg = json::extractDouble(source, "joint_soft_limit_margin_deg", config_.joint_soft_limit_margin_deg);
+  config_.singularity_avoidance_enabled = json::extractBool(source, "singularity_avoidance_enabled", config_.singularity_avoidance_enabled);
+  config_.rl_project_name = json::extractString(source, "rl_project_name", config_.rl_project_name);
+  config_.rl_task_name = json::extractString(source, "rl_task_name", config_.rl_task_name);
+  config_.xpanel_vout_mode = json::extractString(source, "xpanel_vout_mode", config_.xpanel_vout_mode);
+  config_.fc_frame_type = json::extractString(source, "fc_frame_type", config_.fc_frame_type);
+  const auto cartesian_impedance = json::extractDoubleArray(source, "cartesian_impedance", config_.cartesian_impedance);
+  if (!cartesian_impedance.empty()) config_.cartesian_impedance = cartesian_impedance;
+  const auto desired_wrench_n = json::extractDoubleArray(source, "desired_wrench_n", config_.desired_wrench_n);
+  if (!desired_wrench_n.empty()) config_.desired_wrench_n = desired_wrench_n;
+  const auto fc_frame_matrix = json::extractDoubleArray(source, "fc_frame_matrix", config_.fc_frame_matrix);
+  if (!fc_frame_matrix.empty()) config_.fc_frame_matrix = fc_frame_matrix;
+  const auto tcp_frame_matrix = json::extractDoubleArray(source, "tcp_frame_matrix", config_.tcp_frame_matrix);
+  if (!tcp_frame_matrix.empty()) config_.tcp_frame_matrix = tcp_frame_matrix;
+  const auto load_com_mm = json::extractDoubleArray(source, "load_com_mm", config_.load_com_mm);
+  if (!load_com_mm.empty()) config_.load_com_mm = load_com_mm;
+  const auto load_inertia = json::extractDoubleArray(source, "load_inertia", config_.load_inertia);
+  if (!load_inertia.empty()) config_.load_inertia = load_inertia;
 }
 
 void CoreRuntime::loadPlanFromJsonLocked(const std::string& json_line) {
@@ -699,6 +1124,7 @@ void CoreRuntime::loadPlanFromJsonLocked(const std::string& json_line) {
   active_waypoint_index_ = 0;
   progress_pct_ = 0.0;
   active_segment_ = total_segments_ > 0 ? plan.segments.front().segment_id : 0;
+  sdk_robot_.updateSessionRegisters(active_segment_, frame_id_);
   plan_loaded_ = total_segments_ > 0;
 }
 
@@ -727,24 +1153,16 @@ FinalVerdict CoreRuntime::compileScanPlanVerdictLocked(const std::string& json_l
     return verdict;
   }
 
-  if (config_.rt_mode != "cartesianImpedance") {
-    verdict.blockers.push_back("clinical mainline requires cartesianImpedance rt_mode");
-  }
-  if (config_.tool_name.empty()) {
-    verdict.blockers.push_back("tool_name missing");
-  }
-  if (config_.tcp_name.empty()) {
-    verdict.blockers.push_back("tcp_name missing");
-  }
-  if (config_.load_kg <= 0.0) {
-    verdict.blockers.push_back("load_kg must be positive");
-  }
+  appendMainlineContractIssuesLocked(&verdict.blockers, &verdict.warnings);
   const auto safety = evaluateSafetyLocked();
   if (!safety.active_interlocks.empty()) {
     verdict.warnings.push_back("active interlocks present during compile");
   }
   if (!session_id_.empty() && !plan.session_id.empty() && plan.session_id != session_id_) {
     verdict.warnings.push_back("plan session_id differs from locked session");
+  }
+  if (!locked_scan_plan_hash_.empty() && !plan.plan_hash.empty() && locked_scan_plan_hash_ != plan.plan_hash) {
+    verdict.blockers.push_back("plan_hash does not match locked session freeze");
   }
   if (plan.execution_constraints.max_segment_duration_ms == 0) {
     verdict.warnings.push_back("execution constraint max_segment_duration_ms not set");
@@ -753,10 +1171,170 @@ FinalVerdict CoreRuntime::compileScanPlanVerdictLocked(const std::string& json_l
   verdict.accepted = verdict.blockers.empty();
   verdict.policy_state = verdict.accepted ? (verdict.warnings.empty() ? "ready" : "warning") : "blocked";
   verdict.summary_label = verdict.accepted ? (verdict.warnings.empty() ? "模型前检通过" : "模型前检告警") : "模型前检阻塞";
-  verdict.next_state = verdict.accepted ? "lock_session" : "replan_required";
+  verdict.next_state = verdict.accepted ? (session_id_.empty() ? "lock_session" : "load_scan_plan") : "replan_required";
   verdict.reason = verdict.accepted ? (verdict.warnings.empty() ? "scan plan compiled successfully" : "scan plan compiled with warnings") : verdict.blockers.front();
   verdict.detail = verdict.accepted ? (verdict.warnings.empty() ? "scan plan compiled successfully" : "scan plan compiled with warnings") : verdict.blockers.front();
   return verdict;
+}
+
+
+void CoreRuntime::appendMainlineContractIssuesLocked(std::vector<std::string>* blockers, std::vector<std::string>* warnings) const {
+  const auto identity = resolveRobotIdentity(config_.robot_model, config_.sdk_robot_class, config_.axis_count);
+  auto push_blocker = [&](const std::string& message) {
+    if (blockers) blockers->push_back(message);
+  };
+  auto push_warning = [&](const std::string& message) {
+    if (warnings) warnings->push_back(message);
+  };
+  if (config_.rt_mode != identity.clinical_mainline_mode) {
+    push_blocker("clinical mainline requires " + identity.clinical_mainline_mode + " rt_mode");
+  }
+  if (std::find(identity.supported_rt_modes.begin(), identity.supported_rt_modes.end(), config_.rt_mode) == identity.supported_rt_modes.end()) {
+    push_blocker("rt_mode is not supported by the resolved robot identity");
+  }
+  if (config_.rt_mode == "directTorque") {
+    push_blocker("directTorque is forbidden in the clinical mainline");
+  }
+  if (config_.preferred_link != identity.preferred_link) {
+    push_blocker("preferred_link deviates from official clinical mainline link");
+  }
+  if (!config_.requires_single_control_source || !identity.requires_single_control_source) {
+    push_blocker("single control source must be locked before clinical execution");
+  }
+  if (config_.remote_ip.empty() || config_.local_ip.empty()) {
+    push_blocker("remote_ip/local_ip must be configured for connectToRobot");
+  }
+  if (config_.sdk_robot_class != identity.sdk_robot_class || int(config_.axis_count) != int(identity.axis_count)) {
+    push_blocker("robot identity does not match official clinical mainline");
+  }
+  if (config_.tool_name.empty()) {
+    push_blocker("tool_name missing");
+  }
+  if (config_.tcp_name.empty()) {
+    push_blocker("tcp_name missing");
+  }
+  if (config_.load_kg <= 0.0) {
+    push_blocker("load_kg must be positive");
+  }
+  if (!vectorWithinLimits(config_.cartesian_impedance, identity.cartesian_impedance_limits)) {
+    push_blocker("cartesian_impedance exceeds official limits");
+  }
+  if (!vectorWithinLimits(config_.desired_wrench_n, identity.desired_wrench_limits)) {
+    push_blocker("desired_wrench_n exceeds official limits");
+  }
+  if (config_.joint_filter_hz < identity.joint_filter_range_hz.front() || config_.joint_filter_hz > identity.joint_filter_range_hz.back() ||
+      config_.cart_filter_hz < identity.joint_filter_range_hz.front() || config_.cart_filter_hz > identity.joint_filter_range_hz.back() ||
+      config_.torque_filter_hz < identity.joint_filter_range_hz.front() || config_.torque_filter_hz > identity.joint_filter_range_hz.back()) {
+    push_blocker("filter cutoff frequency out of official range");
+  }
+  if (config_.rt_network_tolerance_percent < identity.rt_network_tolerance_range.front() || config_.rt_network_tolerance_percent > identity.rt_network_tolerance_range.back()) {
+    push_blocker("rt_network_tolerance_percent out of official range");
+  } else if (config_.rt_network_tolerance_percent < identity.rt_network_tolerance_recommended.front() || config_.rt_network_tolerance_percent > identity.rt_network_tolerance_recommended.back()) {
+    push_warning("rt_network_tolerance_percent outside recommended range");
+  }
+  if (!config_.collision_detection_enabled) {
+    push_blocker("collision detection must stay enabled in the clinical mainline");
+  }
+  if (!config_.soft_limit_enabled) {
+    push_blocker("soft limit must stay enabled in the clinical mainline");
+  }
+  if (!config_.singularity_avoidance_enabled) {
+    push_warning("singularity avoidance is disabled");
+  }
+  if (!sdk_robot_.sdkAvailable()) {
+    push_warning("vendored xCore SDK is not linked; runtime remains contract-simulated");
+  }
+  if (!sdk_robot_.xmateModelAvailable()) {
+    push_warning("xMateModel is unavailable; model authority is degraded");
+  }
+}
+
+bool CoreRuntime::sessionFreezeConsistentLocked() const {
+  if (session_id_.empty() || session_dir_.empty()) {
+    return false;
+  }
+  if (!(tool_ready_ && tcp_ready_ && load_ready_)) {
+    return false;
+  }
+  if (!locked_scan_plan_hash_.empty() && !plan_hash_.empty() && locked_scan_plan_hash_ != plan_hash_) {
+    return false;
+  }
+  return true;
+}
+
+std::string CoreRuntime::capabilityContractJsonLocked() const {
+  const auto identity = resolveRobotIdentity(config_.robot_model, config_.sdk_robot_class, config_.axis_count);
+  using namespace json;
+  std::vector<std::string> modules;
+  modules.push_back(object({field("module", quote("rokae::Robot")), field("enabled", boolLiteral(true)), field("status", quote("ready")), field("purpose", quote("连接、上电、模式切换、姿态/关节/日志/工具工件查询"))}));
+  modules.push_back(object({field("module", quote("rokae::RtMotionControl")), field("enabled", boolLiteral(config_.rt_mode == identity.clinical_mainline_mode && config_.rt_mode != "directTorque")), field("status", quote(config_.rt_mode == identity.clinical_mainline_mode && config_.rt_mode != "directTorque" ? "ready" : "policy_blocked")), field("purpose", quote("1 kHz 实时阻抗/位置控制主线"))}));
+  modules.push_back(object({field("module", quote("rokae::Planner")), field("enabled", boolLiteral(identity.supports_planner)), field("status", quote(identity.supports_planner ? "ready" : "unsupported")), field("purpose", quote("S 曲线/点位跟随的上位机路径规划"))}));
+  modules.push_back(object({field("module", quote("rokae::xMateModel")), field("enabled", boolLiteral(identity.supports_xmate_model)), field("status", quote(identity.supports_xmate_model ? (sdk_robot_.xmateModelAvailable() ? "ready" : "degraded") : "unsupported")), field("purpose", quote("正逆解、雅可比、动力学前向计算"))}));
+  modules.push_back(object({field("module", quote("通信 I/O")), field("enabled", boolLiteral(true)), field("status", quote("ready")), field("purpose", quote("DI/DO/AI/AO、寄存器、xPanel 供电配置"))}));
+  modules.push_back(object({field("module", quote("RL 工程")), field("enabled", boolLiteral(true)), field("status", quote("ready")), field("purpose", quote("projectsInfo / loadProject / runProject / pauseProject"))}));
+  modules.push_back(object({field("module", quote("协作功能")), field("enabled", boolLiteral(identity.supports_drag || identity.supports_path_replay)), field("status", quote(identity.supports_drag || identity.supports_path_replay ? "ready" : "unsupported")), field("purpose", quote("拖动示教、路径录制/回放、奇异规避"))}));
+  std::vector<std::string> blockers; std::vector<std::string> warnings; appendMainlineContractIssuesLocked(&blockers, &warnings);
+  return object({
+      field("robot_model", quote(identity.robot_model)),
+      field("sdk_robot_class", quote(identity.sdk_robot_class)),
+      field("controller_version", quote(identity.controller_version)),
+      field("preferred_link", quote(config_.preferred_link)),
+      field("rt_loop_hz", std::to_string(1000)),
+      field("scan_rt_mode", quote(config_.rt_mode)),
+      field("runtime_source", quote(sdk_robot_.runtimeSource())),
+      field("modules", objectArray(modules)),
+      field("blockers", objectArray([&](){ std::vector<std::string> items; for (const auto& b: blockers) items.push_back(summaryEntry("capability", b)); return items; }())),
+      field("warnings", objectArray([&](){ std::vector<std::string> items; for (const auto& w: warnings) items.push_back(summaryEntry("capability", w)); return items; }())),
+      field("clinical_policy", object({field("mainline_scan_mode", quote(identity.clinical_mainline_mode)), field("direct_torque_allowed", boolLiteral(false)), field("single_control_source_required", boolLiteral(identity.requires_single_control_source))}))
+  });
+}
+
+std::string CoreRuntime::modelAuthorityContractJsonLocked() const {
+  const auto identity = resolveRobotIdentity(config_.robot_model, config_.sdk_robot_class, config_.axis_count);
+  using namespace json;
+  const bool authoritative_precheck = sdk_robot_.sdkAvailable() && sdk_robot_.xmateModelAvailable() && identity.supports_xmate_model;
+  std::vector<std::string> warnings;
+  if (!sdk_robot_.sdkAvailable()) warnings.push_back(summaryEntry("model_authority", "vendored xCore SDK is not linked; authoritative runtime is unavailable"));
+  if (!sdk_robot_.xmateModelAvailable()) warnings.push_back(summaryEntry("model_authority", "xMateModel library is unavailable; planner/model authority is degraded"));
+  return object({
+      field("authoritative_kernel", quote("cpp_robot_core")),
+      field("runtime_source", quote(sdk_robot_.runtimeSource())),
+      field("robot_model", quote(identity.robot_model)),
+      field("sdk_robot_class", quote(identity.sdk_robot_class)),
+      field("planner_supported", boolLiteral(identity.supports_planner)),
+      field("xmate_model_supported", boolLiteral(identity.supports_xmate_model)),
+      field("authoritative_precheck", boolLiteral(authoritative_precheck)),
+      field("approximate_advisory_allowed", boolLiteral(true)),
+      field("planner_primitives", stringArray({"JointMotionGenerator", "CartMotionGenerator", "FollowPosition"})),
+      field("model_methods", stringArray({"robot.model()", "getCartPose", "getJointPos", "jacobian", "getTorque"})),
+      field("warnings", objectArray(warnings))
+  });
+}
+
+std::string CoreRuntime::releaseContractJsonLocked() const {
+  using namespace json;
+  const auto safety = evaluateSafetyLocked();
+  const bool freeze_consistent = sessionFreezeConsistentLocked();
+  const bool compile_ready = last_final_verdict_.accepted && freeze_consistent;
+  std::vector<std::string> blockers; std::vector<std::string> warnings; appendMainlineContractIssuesLocked(&blockers, &warnings);
+  for (const auto& item : last_final_verdict_.blockers) blockers.push_back(item);
+  for (const auto& item : last_final_verdict_.warnings) warnings.push_back(item);
+  return object({
+      field("session_locked", boolLiteral(!session_id_.empty())),
+      field("session_freeze_consistent", boolLiteral(freeze_consistent)),
+      field("locked_scan_plan_hash", quote(locked_scan_plan_hash_)),
+      field("active_plan_hash", quote(plan_hash_)),
+      field("runtime_source", quote(sdk_robot_.runtimeSource())),
+      field("compile_ready", boolLiteral(compile_ready)),
+      field("ready_for_approach", boolLiteral(compile_ready && execution_state_ == RobotCoreState::PathValidated)),
+      field("ready_for_scan", boolLiteral(compile_ready && execution_state_ == RobotCoreState::ContactStable)),
+      field("release_recommendation", quote(compile_ready && safety.active_interlocks.empty() ? std::string("allow") : std::string("block"))),
+      field("active_interlocks", stringArray(safety.active_interlocks)),
+      field("final_verdict", object({field("accepted", boolLiteral(last_final_verdict_.accepted)), field("policy_state", quote(last_final_verdict_.policy_state)), field("reason", quote(last_final_verdict_.reason)), field("evidence_id", quote(last_final_verdict_.evidence_id))})),
+      field("blockers", objectArray([&](){ std::vector<std::string> items; for (const auto& b: blockers) items.push_back(summaryEntry("release", b)); return items; }())),
+      field("warnings", objectArray([&](){ std::vector<std::string> items; for (const auto& w: warnings) items.push_back(summaryEntry("release", w)); return items; }())),
+      field("active_injections", stringArray([&](){ std::vector<std::string> items(injected_faults_.begin(), injected_faults_.end()); return items; }()))
+  });
 }
 
 std::string CoreRuntime::finalVerdictJson(const FinalVerdict& verdict) const {

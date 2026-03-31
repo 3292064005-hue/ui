@@ -4,43 +4,45 @@ from ipaddress import ip_address
 from typing import Any
 
 from spine_ultrasound_ui.models import RuntimeConfig
+from spine_ultrasound_ui.services.robot_identity_service import RobotIdentity, RobotIdentityService
 from spine_ultrasound_ui.services.xmate_profile import XMateProfile, load_xmate_profile
 
 
 class ClinicalConfigService:
-    """Validate and normalize the desktop runtime config against the xMate mainline.
+    """Validate and normalize the desktop runtime config against the xMate mainline."""
 
-    The service keeps configuration governance separate from SDK capability governance.
-    SDK alignment answers whether the selected control path matches the official xCore
-    mainline, while this service answers whether the application's own runtime numbers,
-    matrices, bands, and scan parameters are internally coherent and close to the
-    preferred clinical baseline.
-    """
-
-    def __init__(self, profile: XMateProfile | None = None) -> None:
+    def __init__(self, profile: XMateProfile | None = None, identity_service: RobotIdentityService | None = None) -> None:
         self.profile = profile or load_xmate_profile()
+        self.identity_service = identity_service or RobotIdentityService(self.profile.robot_model)
+        self.identity = self.identity_service.resolve(
+            self.profile.robot_model,
+            self.profile.sdk_robot_class,
+            self.profile.axis_count,
+        )
 
     def apply_mainline_defaults(self, config: RuntimeConfig) -> RuntimeConfig:
         payload = config.to_dict()
         pressure_policy = dict(self.profile.contact_force_policy)
+        legal_impedance = self._clip_vector(self.profile.cartesian_impedance, self.identity.cartesian_impedance_limits)
+        legal_wrench = self._clip_vector(self.profile.desired_wrench_n, self.identity.desired_wrench_limits)
         payload.update(
-            robot_model=self.profile.robot_model,
-            sdk_robot_class=self.profile.sdk_robot_class,
-            axis_count=self.profile.axis_count,
+            robot_model=self.identity.robot_model,
+            sdk_robot_class=self.identity.sdk_robot_class,
+            axis_count=self.identity.axis_count,
             remote_ip=self.profile.remote_ip,
             local_ip=self.profile.local_ip,
-            preferred_link=self.profile.preferred_link,
-            requires_single_control_source=self.profile.requires_single_control_source,
-            rt_mode=self.profile.rt_mode,
+            preferred_link=self.identity.preferred_link,
+            requires_single_control_source=self.identity.requires_single_control_source,
+            rt_mode=self.identity.rt_mode,
             tool_name=self.profile.tool_name,
             tcp_name=self.profile.tcp_name,
             load_kg=self.profile.load_mass_kg,
             load_com_mm=list(self.profile.load_com_mm),
             load_inertia=list(self.profile.load_inertia),
-            rt_network_tolerance_percent=self.profile.rt_network_tolerance_percent,
-            joint_filter_hz=self.profile.joint_filter_hz,
-            cart_filter_hz=self.profile.cart_filter_hz,
-            torque_filter_hz=self.profile.torque_filter_hz,
+            rt_network_tolerance_percent=max(self.identity.rt_network_tolerance_range[0], min(self.profile.rt_network_tolerance_percent, self.identity.rt_network_tolerance_range[1])),
+            joint_filter_hz=self._clip_scalar(self.profile.joint_filter_hz, *self.identity.joint_filter_range_hz),
+            cart_filter_hz=self._clip_scalar(self.profile.cart_filter_hz, *self.identity.joint_filter_range_hz),
+            torque_filter_hz=self._clip_scalar(self.profile.torque_filter_hz, *self.identity.joint_filter_range_hz),
             collision_detection_enabled=self.profile.collision_detection_enabled,
             collision_sensitivity=self.profile.collision_sensitivity,
             collision_behavior=self.profile.collision_behavior,
@@ -48,8 +50,8 @@ class ClinicalConfigService:
             soft_limit_enabled=self.profile.soft_limit_enabled,
             joint_soft_limit_margin_deg=self.profile.joint_soft_limit_margin_deg,
             singularity_avoidance_enabled=self.profile.singularity_avoidance_enabled,
-            cartesian_impedance=list(self.profile.cartesian_impedance),
-            desired_wrench_n=list(self.profile.desired_wrench_n),
+            cartesian_impedance=legal_impedance,
+            desired_wrench_n=legal_wrench,
             fc_frame_type=self.profile.fc_frame_type,
             fc_frame_matrix=list(self.profile.fc_frame_matrix),
             tcp_frame_matrix=list(self.profile.tcp_frame_matrix),
@@ -67,6 +69,13 @@ class ClinicalConfigService:
 
     def build_report(self, config: RuntimeConfig) -> dict[str, Any]:
         checks: list[dict[str, Any]] = []
+        checks.append(self._check(
+            "机器人身份",
+            config.robot_model == self.identity.robot_model and config.sdk_robot_class == self.identity.sdk_robot_class and int(config.axis_count) == int(self.identity.axis_count),
+            "blocker",
+            f"当前身份 {config.robot_model}/{config.sdk_robot_class}/{config.axis_count} 轴 与官方主线一致。",
+            f"当前身份 {config.robot_model}/{config.sdk_robot_class}/{config.axis_count} 轴，不符合官方主线 {self.identity.robot_model}/{self.identity.sdk_robot_class}/{self.identity.axis_count} 轴。",
+        ))
         checks.append(self._check(
             "压力工作带",
             config.pressure_lower < config.pressure_target < config.pressure_upper,
@@ -109,6 +118,20 @@ class ClinicalConfigService:
             "cartesian_impedance / desired_wrench_n 均为 6 维。",
             "cartesian_impedance 和 desired_wrench_n 都必须是 6 维向量。",
         ))
+        checks.append(self._vector_limit_check(
+            "笛卡尔阻抗官方上限",
+            config.cartesian_impedance,
+            self.identity.cartesian_impedance_limits,
+            severity="blocker",
+            unit="N/m,Nm/rad",
+        ))
+        checks.append(self._vector_limit_check(
+            "末端期望力官方上限",
+            config.desired_wrench_n,
+            self.identity.desired_wrench_limits,
+            severity="blocker",
+            unit="N,Nm",
+        ))
         checks.append(self._check(
             "坐标矩阵维度",
             len(config.fc_frame_matrix) == 16 and len(config.tcp_frame_matrix) == 16,
@@ -124,17 +147,33 @@ class ClinicalConfigService:
             "负载质量必须大于 0，load_com_mm 必须 3 维，load_inertia 必须 6 维。",
         ))
         checks.append(self._check(
-            "滤波与阈值",
-            config.joint_filter_hz > 0 and config.cart_filter_hz > 0 and config.torque_filter_hz > 0 and config.rt_network_tolerance_percent > 0,
+            "滤波截止频率官方范围",
+            self._in_range(config.joint_filter_hz, *self.identity.joint_filter_range_hz)
+            and self._in_range(config.cart_filter_hz, *self.identity.joint_filter_range_hz)
+            and self._in_range(config.torque_filter_hz, *self.identity.joint_filter_range_hz),
             "blocker",
-            f"filters=({config.joint_filter_hz}, {config.cart_filter_hz}, {config.torque_filter_hz}), tolerance={config.rt_network_tolerance_percent}%",
-            "滤波截止频率和 RT 网络容忍阈值必须为正值。",
+            f"filters=({config.joint_filter_hz}, {config.cart_filter_hz}, {config.torque_filter_hz}) Hz",
+            f"滤波截止频率必须落在 {self.identity.joint_filter_range_hz[0]}~{self.identity.joint_filter_range_hz[1]} Hz。",
+        ))
+        checks.append(self._check(
+            "RT 网络阈值官方范围",
+            self._in_range(int(config.rt_network_tolerance_percent), *self.identity.rt_network_tolerance_range),
+            "blocker",
+            f"rt_network_tolerance_percent={config.rt_network_tolerance_percent}",
+            f"RT 网络阈值必须落在 {self.identity.rt_network_tolerance_range[0]}~{self.identity.rt_network_tolerance_range[1]}。",
+        ))
+        checks.append(self._check(
+            "RT 网络阈值建议区间",
+            self._in_range(int(config.rt_network_tolerance_percent), *self.identity.rt_network_tolerance_recommended),
+            "warning",
+            f"rt_network_tolerance_percent={config.rt_network_tolerance_percent}，落在建议 {self.identity.rt_network_tolerance_recommended[0]}~{self.identity.rt_network_tolerance_recommended[1]}。",
+            f"rt_network_tolerance_percent={config.rt_network_tolerance_percent}，建议调整到 {self.identity.rt_network_tolerance_recommended[0]}~{self.identity.rt_network_tolerance_recommended[1]}。",
         ))
         checks.append(self._check(
             "主线配置贴合度",
-            config.rt_mode == self.profile.rt_mode and config.preferred_link == self.profile.preferred_link and config.sdk_robot_class == self.profile.sdk_robot_class,
+            config.rt_mode == self.identity.rt_mode and config.preferred_link == self.identity.preferred_link and bool(config.requires_single_control_source),
             "warning",
-            f"rt_mode={config.rt_mode}, link={config.preferred_link}, robot_class={config.sdk_robot_class}",
+            f"rt_mode={config.rt_mode}, link={config.preferred_link}, single_source={config.requires_single_control_source}",
             "当前配置与 xMate 主线基线存在偏差，建议应用主线基线后再继续。",
         ))
         checks.append(self._check(
@@ -163,29 +202,34 @@ class ClinicalConfigService:
             "warnings": warnings,
             "profile_robot_model": self.profile.robot_model,
             "profile_sdk_robot_class": self.profile.sdk_robot_class,
+            "resolved_identity": self.identity.to_dict(),
             "recommended_patch": self._recommended_patch(config),
             "baseline_summary": {
-                "rt_mode": self.profile.rt_mode,
-                "preferred_link": self.profile.preferred_link,
+                "rt_mode": self.identity.rt_mode,
+                "preferred_link": self.identity.preferred_link,
                 "tool_name": self.profile.tool_name,
                 "tcp_name": self.profile.tcp_name,
                 "target_force_n": self.profile.contact_force_policy.get("target_n", 0.0),
                 "warning_force_n": self.profile.contact_force_policy.get("warning_n", 0.0),
+                "cartesian_impedance_limits": list(self.identity.cartesian_impedance_limits),
+                "desired_wrench_limits": list(self.identity.desired_wrench_limits),
             },
         }
 
     def _recommended_patch(self, config: RuntimeConfig) -> list[dict[str, Any]]:
         patch: list[dict[str, Any]] = []
         expected = {
-            "robot_model": self.profile.robot_model,
-            "sdk_robot_class": self.profile.sdk_robot_class,
-            "axis_count": self.profile.axis_count,
+            "robot_model": self.identity.robot_model,
+            "sdk_robot_class": self.identity.sdk_robot_class,
+            "axis_count": self.identity.axis_count,
             "remote_ip": self.profile.remote_ip,
-            "preferred_link": self.profile.preferred_link,
-            "rt_mode": self.profile.rt_mode,
+            "preferred_link": self.identity.preferred_link,
+            "rt_mode": self.identity.rt_mode,
             "tool_name": self.profile.tool_name,
             "tcp_name": self.profile.tcp_name,
             "rt_network_tolerance_percent": self.profile.rt_network_tolerance_percent,
+            "cartesian_impedance": self._clip_vector(config.cartesian_impedance, self.identity.cartesian_impedance_limits),
+            "desired_wrench_n": self._clip_vector(config.desired_wrench_n, self.identity.desired_wrench_limits),
         }
         current = config.to_dict()
         for key, value in expected.items():
@@ -204,3 +248,30 @@ class ClinicalConfigService:
         except ValueError:
             return False
         return True
+
+    @staticmethod
+    def _clip_scalar(value: float, lower: float, upper: float) -> float:
+        return max(lower, min(float(value), upper))
+
+    @staticmethod
+    def _clip_vector(values: list[float], limits: tuple[float, ...]) -> list[float]:
+        payload = [float(values[idx]) if idx < len(values) else 0.0 for idx in range(len(limits))]
+        return [max(-limit, min(payload[idx], limit)) for idx, limit in enumerate(limits)]
+
+    @staticmethod
+    def _in_range(value: float | int, lower: float | int, upper: float | int) -> bool:
+        return float(lower) <= float(value) <= float(upper)
+
+    @staticmethod
+    def _vector_limit_check(name: str, values: list[float], limits: tuple[float, ...], *, severity: str, unit: str) -> dict[str, Any]:
+        ok = len(values) == len(limits) and all(abs(float(value)) <= float(limits[idx]) for idx, value in enumerate(values[: len(limits)]))
+        return {
+            "name": name,
+            "ok": ok,
+            "severity": severity,
+            "detail": (
+                f"当前值 {list(values)} 在官方上限 {list(limits)} ({unit}) 内。"
+                if ok
+                else f"当前值 {list(values)} 超出官方上限 {list(limits)} ({unit})。"
+            ),
+        }

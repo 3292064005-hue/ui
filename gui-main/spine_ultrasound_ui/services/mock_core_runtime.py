@@ -8,8 +8,11 @@ from typing import Any, Dict, List, Optional
 from spine_ultrasound_ui.core.session_recorders import JsonlRecorder
 from spine_ultrasound_ui.models import RuntimeConfig, ScanPlan, SystemState
 from spine_ultrasound_ui.services.force_control_config import load_force_control_config
+from spine_ultrasound_ui.services.clinical_config_service import ClinicalConfigService
+from spine_ultrasound_ui.services.sdk_capability_service import SdkCapabilityService
 from spine_ultrasound_ui.services.ipc_protocol import ReplyEnvelope, TelemetryEnvelope
 from spine_ultrasound_ui.services.pressure_sensor_service import ForceSensorProvider, create_force_sensor_provider
+from spine_ultrasound_ui.services.robot_identity_service import RobotIdentityService
 from spine_ultrasound_ui.services.xmate_model_service import XMateModelService
 from spine_ultrasound_ui.utils import ensure_dir, now_ns
 
@@ -83,7 +86,7 @@ class MockCoreRuntime:
         self.force_sensor_timeout_alarm = False
         self.force_sensor_estop_alarm = False
         self.devices = {
-            "robot": self._device(False, "offline", "xMate ER3 控制器未连接"),
+            "robot": self._device(False, "offline", "xMate3 控制器未连接"),
             "camera": self._device(False, "offline", "摄像头未连接"),
             "pressure": self._device(False, "offline", "压力传感器未连接"),
             "ultrasound": self._device(False, "offline", "超声设备未连接"),
@@ -95,7 +98,13 @@ class MockCoreRuntime:
         self.cart_force = [0.0] * 6
         self.pending_alarms: list[dict[str, Any]] = []
         self.model_service = XMateModelService()
+        self.identity_service = RobotIdentityService()
+        self.clinical_config_service = ClinicalConfigService()
+        self.capability_service = SdkCapabilityService()
         self.last_final_verdict: dict[str, Any] = {}
+        self.session_locked_ts_ns = 0
+        self.locked_scan_plan_hash = ""
+        self.injected_faults: set[str] = set()
 
     def update_runtime_config(self, config: RuntimeConfig) -> None:
         self.config = config
@@ -117,6 +126,12 @@ class MockCoreRuntime:
         self.feature_confidence = 0.74 + 0.10 * math.cos(self.phase * 0.45)
         self.quality_score = round((self.image_quality + self.feature_confidence) / 2.0, 3)
         self._update_robot_kinematics()
+        if 'overpressure' in self.injected_faults and self.execution_state in {SystemState.CONTACT_STABLE, SystemState.SCANNING, SystemState.PAUSED_HOLD}:
+            self.pressure_current = max(self.config.pressure_upper + 0.5, self.force_control['max_z_force_n'] + 0.5)
+        if 'pressure_stale' in self.injected_faults:
+            self.force_sensor_stale_ticks = max(self.force_sensor_stale_ticks, 1)
+        if 'rt_jitter_high' in self.injected_faults:
+            self.rt_jitter_ok = False
         self._update_contact_and_progress()
         ts_ns = now_ns()
         self._refresh_device_health(ts_ns)
@@ -207,6 +222,182 @@ class MockCoreRuntime:
         self.pending_alarms.clear()
         return messages
 
+
+    def _runtime_alignment_payload(self) -> dict[str, Any]:
+        return {
+            "sdk_family": "ROKAE xCore SDK (C++)",
+            "robot_model": self.config.robot_model,
+            "sdk_robot_class": self.config.sdk_robot_class,
+            "axis_count": self.config.axis_count,
+            "remote_ip": self.config.remote_ip,
+            "local_ip": self.config.local_ip,
+            "preferred_link": self.config.preferred_link,
+            "rt_mode": self.config.rt_mode,
+            "single_control_source": self.config.requires_single_control_source,
+            "source": "mock_runtime_contract",
+            "sdk_available": False,
+        }
+
+    def _xmate_model_summary_payload(self) -> dict[str, Any]:
+        profile = self.model_service.profile
+        return {
+            "robot_model": profile.robot_model,
+            "sdk_robot_class": profile.sdk_robot_class,
+            "axis_count": profile.axis_count,
+            "dh_parameters": [item.to_dict() for item in profile.dh_parameters],
+            "supported_rt_modes": list(profile.supported_rt_modes),
+            "clinical_mainline_mode": profile.rt_mode,
+            "approximate": True,
+            "source": "python_profile_contract",
+        }
+
+    def _identity_payload(self) -> dict[str, Any]:
+        identity = self.identity_service.resolve(self.config.robot_model, self.config.sdk_robot_class, self.config.axis_count)
+        return identity.to_dict()
+
+    def _clinical_mainline_contract_payload(self) -> dict[str, Any]:
+        identity = self.identity_service.resolve(self.config.robot_model, self.config.sdk_robot_class, self.config.axis_count)
+        return {
+            "robot_model": identity.robot_model,
+            "clinical_mainline_mode": identity.rt_mode,
+            "required_sequence": ["connect_robot", "power_on", "set_auto_mode", "lock_session", "load_scan_plan", "approach_prescan", "seek_contact", "start_scan", "safe_retreat"],
+            "single_control_source_required": identity.requires_single_control_source,
+            "preferred_link": identity.preferred_link,
+            "rt_loop_hz": 1000,
+            "cartesian_impedance_limits": list(identity.cartesian_impedance_limits),
+            "desired_wrench_limits": list(identity.desired_wrench_limits),
+        }
+
+    def _session_freeze_payload(self) -> dict[str, Any]:
+        return {
+            "session_locked": bool(self.session_id),
+            "session_id": self.session_id,
+            "session_dir": str(self.session_dir) if self.session_dir else "",
+            "locked_at_ns": int(self.session_locked_ts_ns),
+            "plan_hash": self.plan_hash,
+            "active_segment": int(self.active_segment),
+            "tool_name": self.config.tool_name,
+            "tcp_name": self.config.tcp_name,
+            "load_kg": self.config.load_kg,
+            "rt_mode": self.config.rt_mode,
+            "cartesian_impedance": list(self.config.cartesian_impedance),
+            "desired_wrench_n": list(self.config.desired_wrench_n),
+        }
+
+
+    def _capability_contract_payload(self) -> dict[str, Any]:
+        robot_snapshot = {"operate_mode": self.operate_mode, "powered": self.powered}
+        return dict(self.capability_service.build(self.config, robot_snapshot))
+
+    def _model_authority_contract_payload(self) -> dict[str, Any]:
+        identity = self.identity_service.resolve(self.config.robot_model, self.config.sdk_robot_class, self.config.axis_count)
+        return {
+            "authoritative_kernel": "cpp_robot_core",
+            "runtime_source": "mock_runtime_contract",
+            "robot_model": identity.robot_model,
+            "sdk_robot_class": identity.sdk_robot_class,
+            "planner_supported": bool(identity.supports_planner),
+            "xmate_model_supported": bool(identity.supports_xmate_model),
+            "authoritative_precheck": False,
+            "approximate_advisory_allowed": True,
+            "planner_primitives": ["JointMotionGenerator", "CartMotionGenerator", "FollowPosition"],
+            "model_methods": ["robot.model()", "getCartPose", "getJointPos", "jacobian", "getTorque"],
+            "warnings": [
+                {"name": "model_authority", "detail": "mock runtime does not execute vendored C++ xMateModel / Planner"}
+            ],
+        }
+
+    def _recovery_contract_payload(self) -> dict[str, Any]:
+        return {
+            "collision_behavior": self.config.collision_behavior,
+            "pause_resume_enabled": True,
+            "safe_retreat_enabled": True,
+            "resume_force_band_n": self.force_control["resume_force_band_n"],
+            "warning_z_force_n": self.force_control["warning_z_force_n"],
+            "max_z_force_n": self.force_control["max_z_force_n"],
+            "sensor_timeout_ms": self.force_control["sensor_timeout_ms"],
+            "stale_telemetry_ms": self.force_control["stale_telemetry_ms"],
+            "emergency_retract_mm": self.force_control["emergency_retract_mm"],
+        }
+
+    def _sdk_runtime_config_payload(self) -> dict[str, Any]:
+        return {
+            "robot_model": self.config.robot_model,
+            "sdk_robot_class": self.config.sdk_robot_class,
+            "remote_ip": self.config.remote_ip,
+            "local_ip": self.config.local_ip,
+            "axis_count": self.config.axis_count,
+            "rt_network_tolerance_percent": self.config.rt_network_tolerance_percent,
+            "joint_filter_hz": self.config.joint_filter_hz,
+            "cart_filter_hz": self.config.cart_filter_hz,
+            "torque_filter_hz": self.config.torque_filter_hz,
+            "cartesian_impedance": list(self.config.cartesian_impedance),
+            "desired_wrench_n": list(self.config.desired_wrench_n),
+            "fc_frame_type": self.config.fc_frame_type,
+            "fc_frame_matrix": list(self.config.fc_frame_matrix),
+            "tcp_frame_matrix": list(self.config.tcp_frame_matrix),
+            "load_com_mm": list(self.config.load_com_mm),
+            "load_inertia": list(self.config.load_inertia),
+        }
+
+
+    def _release_contract_payload(self) -> dict[str, Any]:
+        safety = self._safety_status()
+        freeze_consistent = bool(self.session_id) and bool(self.session_dir) and self.tool_ready and self.tcp_ready and self.load_ready and (not self.locked_scan_plan_hash or not self.plan_hash or self.locked_scan_plan_hash == self.plan_hash)
+        final_verdict = dict(self.last_final_verdict.get("final_verdict", {}))
+        blockers = list(self.last_final_verdict.get("blockers", []))
+        warnings = list(self.last_final_verdict.get("warnings", []))
+        return {
+            "session_locked": bool(self.session_id),
+            "session_freeze_consistent": freeze_consistent,
+            "locked_scan_plan_hash": self.locked_scan_plan_hash,
+            "active_plan_hash": self.plan_hash,
+            "runtime_source": "mock_runtime_contract",
+            "compile_ready": bool(final_verdict.get("accepted")) and freeze_consistent,
+            "ready_for_approach": bool(final_verdict.get("accepted")) and freeze_consistent and self.execution_state == SystemState.PATH_VALIDATED,
+            "ready_for_scan": bool(final_verdict.get("accepted")) and freeze_consistent and self.execution_state == SystemState.CONTACT_STABLE,
+            "release_recommendation": "allow" if bool(final_verdict.get("accepted")) and freeze_consistent and not safety.get("active_interlocks") else "block",
+            "active_interlocks": list(safety.get("active_interlocks", [])),
+            "final_verdict": final_verdict,
+            "blockers": blockers,
+            "warnings": warnings,
+            "active_injections": sorted(self.injected_faults),
+        }
+
+
+    def _deployment_contract_payload(self) -> dict[str, Any]:
+        identity = self.identity_service.resolve(self.config.robot_model, self.config.sdk_robot_class, self.config.axis_count)
+        return {
+            "runtime_source": "mock_runtime_contract",
+            "vendored_sdk_required": True,
+            "vendored_sdk_detected": False,
+            "xmate_model_detected": False,
+            "preferred_link": identity.preferred_link,
+            "single_control_source_required": identity.requires_single_control_source,
+            "required_host_dependencies": ["cmake", "g++/clang++", "protobuf headers", "protoc", "openssl headers"],
+            "required_runtime_materials": ["configs/tls/runtime/*", "vendored librokae include/lib/external"],
+            "bringup_sequence": ["doctor_runtime.py", "generate_dev_tls_cert.sh", "start_real.sh", "run.py --backend core"],
+            "systemd_units": ["spine-cpp-core.service", "spine-python-api.service", "spine-web-kiosk.service", "spine-ultrasound.target"],
+            "summary_label": "mock deployment contract",
+        }
+
+    def _fault_injection_contract_payload(self) -> dict[str, Any]:
+        catalog = [
+            {"name": "pressure_stale", "effect": "forces stale telemetry watchdog and estop path", "phase_scope": ["CONTACT_SEEKING", "SCANNING", "PAUSED_HOLD"], "recoverable": False},
+            {"name": "rt_jitter_high", "effect": "marks RT jitter interlock active", "phase_scope": ["CONTACT_SEEKING", "SCANNING", "PAUSED_HOLD"], "recoverable": True},
+            {"name": "overpressure", "effect": "forces pressure above upper bound and pause/retreat logic", "phase_scope": ["CONTACT_STABLE", "SCANNING"], "recoverable": True},
+            {"name": "collision_event", "effect": "injects recoverable collision alarm and retreat", "phase_scope": ["APPROACHING", "CONTACT_SEEKING", "SCANNING"], "recoverable": True},
+            {"name": "plan_hash_mismatch", "effect": "breaks locked plan hash consistency", "phase_scope": ["SESSION_LOCKED", "PATH_VALIDATED"], "recoverable": True},
+            {"name": "estop_latch", "effect": "forces ESTOP latched state", "phase_scope": ["*"], "recoverable": False},
+        ]
+        return {
+            "runtime_source": "mock_runtime_contract",
+            "enabled": True,
+            "simulation_only": True,
+            "active_injections": sorted(self.injected_faults),
+            "catalog": catalog,
+        }
+
     def _append_controller_log(self, level: str, message: str, source: str = "sdk") -> None:
         self.last_controller_log = f"{level}: {message}"
         self.controller_logs.insert(0, {"level": level, "message": message, "source": source})
@@ -272,6 +463,10 @@ class MockCoreRuntime:
         snapshot["xpanel_vout_mode"] = self.config.xpanel_vout_mode
         return ReplyEnvelope(ok=True, message="get_io_snapshot accepted", data=snapshot)
 
+    def _cmd_get_register_snapshot(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_register_snapshot accepted", data={"registers": dict(self.io_state.get("registers", {}))})
+
     def _cmd_get_safety_config(self, payload: dict) -> ReplyEnvelope:
         del payload
         return ReplyEnvelope(
@@ -302,8 +497,103 @@ class MockCoreRuntime:
                     "cart_hz": self.config.cart_filter_hz,
                     "torque_hz": self.config.torque_filter_hz,
                 },
+                "collision_behavior": self.config.collision_behavior,
+                "collision_detection_enabled": self.config.collision_detection_enabled,
+                "soft_limit_enabled": self.config.soft_limit_enabled,
             },
         )
+
+    def _cmd_get_runtime_alignment(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_runtime_alignment accepted", data=self._runtime_alignment_payload())
+
+    def _cmd_get_xmate_model_summary(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_xmate_model_summary accepted", data=self._xmate_model_summary_payload())
+
+    def _cmd_get_sdk_runtime_config(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_sdk_runtime_config accepted", data=self._sdk_runtime_config_payload())
+
+
+    def _cmd_get_identity_contract(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_identity_contract accepted", data=self._identity_payload())
+
+    def _cmd_get_clinical_mainline_contract(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_clinical_mainline_contract accepted", data=self._clinical_mainline_contract_payload())
+
+    def _cmd_get_session_freeze(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_session_freeze accepted", data=self._session_freeze_payload())
+
+    def _cmd_get_recovery_contract(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_recovery_contract accepted", data=self._recovery_contract_payload())
+
+    def _cmd_get_capability_contract(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_capability_contract accepted", data=self._capability_contract_payload())
+
+    def _cmd_get_model_authority_contract(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_model_authority_contract accepted", data=self._model_authority_contract_payload())
+
+    def _cmd_get_release_contract(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_release_contract accepted", data=self._release_contract_payload())
+
+    def _cmd_get_deployment_contract(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_deployment_contract accepted", data=self._deployment_contract_payload())
+
+    def _cmd_get_fault_injection_contract(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        return ReplyEnvelope(ok=True, message="get_fault_injection_contract accepted", data=self._fault_injection_contract_payload())
+
+    def _cmd_inject_fault(self, payload: dict) -> ReplyEnvelope:
+        fault = str(payload.get("fault_name", "")).strip()
+        if not fault:
+            return ReplyEnvelope(ok=False, message="fault_name missing")
+        self.injected_faults.add(fault)
+        if fault == "pressure_stale":
+            self.force_sensor_stale_ticks = max(self.force_sensor_stale_ticks, max(2, int(self.config.pressure_stale_ms / 100)))
+            self.pressure_fresh = False
+        elif fault == "rt_jitter_high":
+            self.rt_jitter_ok = False
+        elif fault == "overpressure":
+            self.pressure_current = max(self.config.pressure_upper + 0.5, self.force_control["max_z_force_n"] + 0.5)
+        elif fault == "collision_event":
+            self.pending_alarms.append({
+                "severity": "RECOVERABLE_FAULT", "source": "collision", "message": "模拟碰撞事件", "session_id": self.session_id,
+                "segment_id": int(self.active_segment), "event_ts_ns": now_ns(), "workflow_step": "fault_injection", "request_id": "", "auto_action": "safe_retreat"
+            })
+            self.execution_state = SystemState.RETREATING
+            self.retreat_ticks_remaining = max(self.retreat_ticks_remaining, 10)
+        elif fault == "plan_hash_mismatch":
+            self.plan_hash = f"mismatch:{self.plan_hash or 'empty'}"
+        elif fault == "estop_latch":
+            self.execution_state = SystemState.ESTOP
+            self.fault_code = "ESTOP_INJECTED"
+        else:
+            self.injected_faults.discard(fault)
+            return ReplyEnvelope(ok=False, message=f"unsupported fault injection: {fault}")
+        self._append_controller_log("WARN", f"fault injected: {fault}", source="fault_injection")
+        return ReplyEnvelope(ok=True, message="inject_fault accepted", data=self._fault_injection_contract_payload())
+
+    def _cmd_clear_injected_faults(self, payload: dict) -> ReplyEnvelope:
+        del payload
+        self.injected_faults.clear()
+        self.rt_jitter_ok = True
+        self.force_sensor_stale_ticks = 0
+        self.force_sensor_timeout_alarm = False
+        self.force_sensor_estop_alarm = False
+        if self.execution_state == SystemState.ESTOP and self.fault_code == "ESTOP_INJECTED":
+            self.execution_state = SystemState.AUTO_READY if self.operate_mode == "automatic" and self.powered else (SystemState.POWERED if self.powered else SystemState.CONNECTED)
+            self.fault_code = ""
+        self._append_controller_log("INFO", "fault injections cleared", source="fault_injection")
+        return ReplyEnvelope(ok=True, message="clear_injected_faults accepted", data=self._fault_injection_contract_payload())
 
     def _cmd_connect_robot(self, payload: dict) -> ReplyEnvelope:
         del payload
@@ -312,7 +602,7 @@ class MockCoreRuntime:
         self.execution_state = SystemState.CONNECTED
         self.controller_online = True
         self.devices = {
-            "robot": self._device(True, "online", "xMate ER3 robot_core 已连接"),
+            "robot": self._device(True, "online", "xMate3 robot_core 已连接"),
             "camera": self._device(True, "online", "摄像头在线"),
             "pressure": self._device(True, "online", f"压力传感器在线 ({self.force_sensor_provider_name})"),
             "ultrasound": self._device(True, "online", "超声设备在线"),
@@ -373,9 +663,16 @@ class MockCoreRuntime:
         self.session_id = str(payload.get("session_id", ""))
         if not self.session_id:
             return ReplyEnvelope(ok=False, message="session_id missing")
+        self.locked_scan_plan_hash = str(payload.get("scan_plan_hash", ""))
         config_snapshot = dict(payload.get("config_snapshot", {}))
         if config_snapshot:
             self.config = RuntimeConfig.from_dict(config_snapshot)
+        capability_report = self.capability_service.build(self.config, {"operate_mode": self.operate_mode, "powered": self.powered})
+        blockers = list(capability_report.get("blockers", []))
+        if blockers:
+            self.session_id = ""
+            self.locked_scan_plan_hash = ""
+            return ReplyEnvelope(ok=False, message=str(blockers[0].get("detail", blockers[0].get("name", "configuration blocked"))))
         self.tool_ready = bool(self.config.tool_name)
         self.tcp_ready = bool(self.config.tcp_name)
         self.load_ready = self.config.load_kg > 0.0
@@ -384,6 +681,7 @@ class MockCoreRuntime:
         self.force_sensor_provider_name = str(payload.get("force_sensor_provider", self.config.force_sensor_provider))
         self.force_sensor_provider = create_force_sensor_provider(self.force_sensor_provider_name)
         self._open_recorders(self.session_dir, self.session_id)
+        self.session_locked_ts_ns = now_ns()
         self.execution_state = SystemState.SESSION_LOCKED
         self._append_controller_log("INFO", f"session locked: {self.session_id}")
         self.recovery_reason = ""
@@ -400,6 +698,10 @@ class MockCoreRuntime:
             return ReplyEnvelope(ok=False, message=validation_error)
         self.scan_plan = plan_payload
         self.plan_hash = self._plan_hash(plan_payload)
+        if self.locked_scan_plan_hash and self.plan_hash and self.locked_scan_plan_hash != self.plan_hash:
+            self.scan_plan = None
+            self.plan_hash = ""
+            return ReplyEnvelope(ok=False, message="locked scan_plan_hash does not match loaded plan")
         self.path_index = 0
         self.progress_pct = 0.0
         self.active_segment = 0
@@ -835,7 +1137,10 @@ class MockCoreRuntime:
     def _plan_hash(plan_payload: dict[str, Any]) -> str:
         import hashlib
         import json
-        return hashlib.sha256(json.dumps(plan_payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+        canonical = dict(plan_payload)
+        canonical.pop("plan_hash", None)
+        canonical.pop("scan_plan_hash", None)
+        return hashlib.sha256(json.dumps(canonical, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
     @staticmethod
     def _validate_scan_plan(plan_payload: dict[str, Any]) -> str:
@@ -870,17 +1175,30 @@ class MockCoreRuntime:
 
 
     def compile_scan_plan_verdict(self, plan_payload: dict[str, Any] | None, config_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
-        config = RuntimeConfig(**dict(config_snapshot or self.config.to_dict()))
+        config = RuntimeConfig.from_dict(dict(config_snapshot or self.config.to_dict()))
         plan = None
+        plan_error = ""
         if plan_payload:
             try:
                 plan = ScanPlan.from_dict(dict(plan_payload))
             except Exception:
                 plan = None
+                plan_error = "scan plan parse failed"
+            if not plan_error:
+                plan_error = self._validate_scan_plan(dict(plan_payload))
         advisory = self.model_service.build_report(plan, config)
-        summary_state = str(advisory.get('summary_state', 'idle'))
-        accepted = summary_state not in {'blocked'}
+        capability = self.capability_service.build(config, {"operate_mode": self.operate_mode, "powered": self.powered})
+        baseline = self.clinical_config_service.build_report(config)
+        blockers = list(advisory.get('blockers', [])) + list(capability.get('blockers', [])) + list(baseline.get('blockers', []))
+        warnings = list(advisory.get('warnings', [])) + list(capability.get('warnings', [])) + list(baseline.get('warnings', []))
+        if plan_error:
+            blockers.append({"name": "scan_plan", "severity": "blocker", "detail": plan_error})
+        if self.locked_scan_plan_hash and plan is not None and getattr(plan, 'plan_hash', '') and self.locked_scan_plan_hash != plan.plan_hash:
+            blockers.append({"name": "session_freeze", "severity": "blocker", "detail": "plan_hash does not match locked session freeze"})
+        summary_state = 'blocked' if blockers else ('warning' if warnings else 'ready')
+        accepted = summary_state != 'blocked'
         evidence_id = f"mock-verdict:{plan.plan_id if plan is not None else 'none'}:{self.session_id or 'unlocked'}"
+        detail = str(advisory.get('detail', '')) if accepted else str(blockers[0].get('detail', 'compile blocked'))
         verdict = {
             'summary_state': summary_state,
             'summary_label': {
@@ -889,21 +1207,24 @@ class MockCoreRuntime:
                 'blocked': '模型前检阻塞',
                 'idle': '未生成路径',
             }.get(summary_state, '运行时前检'),
-            'detail': str(advisory.get('detail', '')),
-            'warnings': list(advisory.get('warnings', [])),
-            'blockers': list(advisory.get('blockers', [])),
+            'detail': detail,
+            'warnings': warnings,
+            'blockers': blockers,
             'authority_source': 'cpp_robot_core',
             'verdict_kind': 'final',
             'approximate': False,
             'model_contract': dict(advisory.get('model_contract', {})),
             'plan_metrics': dict(advisory.get('plan_metrics', {})),
             'execution_selection': dict(advisory.get('execution_selection', {})),
+            'capability_contract': capability,
+            'baseline_contract': baseline,
+            'model_authority_contract': self._model_authority_contract_payload(),
             'advisory_python': advisory,
             'final_verdict': {
                 'accepted': accepted,
-                'reason': str(advisory.get('detail', '')),
+                'reason': detail,
                 'evidence_id': evidence_id,
-                'expected_state_delta': {'next_state': 'lock_session' if accepted else 'replan_required'},
+                'expected_state_delta': {'next_state': 'lock_session' if accepted and not self.session_id else ('load_scan_plan' if accepted else 'replan_required')},
                 'policy_state': summary_state,
                 'source': 'cpp_robot_core',
                 'advisory_only': False,

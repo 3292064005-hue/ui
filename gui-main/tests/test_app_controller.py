@@ -114,6 +114,33 @@ def test_app_controller_requests_safe_retreat_if_scan_start_chain_fails(tmp_path
     assert controller.workflow_artifacts.session_locked is True
 
 
+def test_app_controller_loads_session_bound_scan_plan_after_lock(tmp_path):
+    class InspectPlanBackend(MockBackend):
+        def __init__(self, root_dir: Path):
+            super().__init__(root_dir)
+            self.loaded_plan: dict | None = None
+
+        def send_command(self, command, payload=None):
+            if command == "load_scan_plan":
+                self.loaded_plan = dict((payload or {}).get("scan_plan", {}))
+            return super().send_command(command, payload)
+
+    _app()
+    backend = InspectPlanBackend(Path(tmp_path))
+    controller = AppController(Path(tmp_path), backend)
+    controller.connect_robot()
+    controller.power_on()
+    controller.set_auto_mode()
+    controller.create_experiment()
+    controller.run_localization()
+    controller.generate_path()
+    controller.start_scan()
+
+    assert backend.loaded_plan is not None
+    assert backend.loaded_plan.get("session_id") == controller.workflow_artifacts.session_id
+    assert backend.loaded_plan.get("plan_hash")
+
+
 def test_app_controller_keeps_session_locked_if_load_scan_plan_fails(tmp_path):
     class LoadPlanFailBackend(MockBackend):
         def __init__(self, root_dir: Path):

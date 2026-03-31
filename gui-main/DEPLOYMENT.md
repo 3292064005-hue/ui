@@ -17,3 +17,12 @@ Runtime boundaries:
 - C++ / robot core owns real motion authority and final runtime verdicts
 - Python headless exposes contracts, evidence access, and profile guards
 - Desktop/Web consume the control-plane snapshot and do not invent parallel truth
+
+
+Preflight:
+
+```bash
+python scripts/doctor_runtime.py
+```
+
+Real runtime launch now runs the doctor first and will also honor `XCORE_SDK_ROOT` / `ROKAE_SDK_ROOT` when building the C++ core.

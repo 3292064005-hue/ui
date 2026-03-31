@@ -30,14 +30,21 @@ enum class RobotCoreState {
 };
 
 struct RuntimeConfig {
-  double pressure_target{1.5};
-  double pressure_upper{2.0};
-  double pressure_lower{1.0};
+  double pressure_target{8.0};
+  double pressure_upper{12.0};
+  double pressure_lower{5.0};
   double scan_speed_mm_s{8.0};
   double sample_step_mm{0.5};
   double segment_length_mm{120.0};
+  double strip_width_mm{18.0};
+  double strip_overlap_mm{6.0};
   double contact_seek_speed_mm_s{3.0};
   double retreat_speed_mm_s{20.0};
+  double image_quality_threshold{0.7};
+  double smoothing_factor{0.35};
+  double reconstruction_step{0.5};
+  double feature_threshold{0.6};
+  std::string roi_mode{"auto"};
   std::string rt_mode{"cartesianImpedance"};
   int network_stale_ms{150};
   int pressure_stale_ms{100};
@@ -45,6 +52,43 @@ struct RuntimeConfig {
   std::string tool_name{"ultrasound_probe"};
   std::string tcp_name{"ultrasound_tcp"};
   double load_kg{0.85};
+  std::string remote_ip{"192.168.0.160"};
+  std::string local_ip{"192.168.0.100"};
+  std::string force_sensor_provider{"mock_force_sensor"};
+  std::string robot_model{"xmate3"};
+  int axis_count{6};
+  std::string sdk_robot_class{"xMateRobot"};
+  std::string preferred_link{"wired_direct"};
+  bool requires_single_control_source{true};
+  std::string build_id{"dev"};
+  std::string software_version{"0.3.0"};
+  int rt_network_tolerance_percent{15};
+  double joint_filter_hz{40.0};
+  double cart_filter_hz{30.0};
+  double torque_filter_hz{25.0};
+  bool collision_detection_enabled{true};
+  int collision_sensitivity{4};
+  std::string collision_behavior{"pause_hold"};
+  double collision_fallback_mm{8.0};
+  bool soft_limit_enabled{true};
+  double joint_soft_limit_margin_deg{5.0};
+  bool singularity_avoidance_enabled{true};
+  std::string rl_project_name{"spine_mainline"};
+  std::string rl_task_name{"scan"};
+  std::string xpanel_vout_mode{"off"};
+  std::vector<double> cartesian_impedance{1000.0, 1000.0, 1000.0, 80.0, 80.0, 80.0};
+  std::vector<double> desired_wrench_n{0.0, 0.0, 8.0, 0.0, 0.0, 0.0};
+  std::string fc_frame_type{"path"};
+  std::vector<double> fc_frame_matrix{1.0, 0.0, 0.0, 0.0,
+                                      0.0, 1.0, 0.0, 0.0,
+                                      0.0, 0.0, 1.0, 0.0,
+                                      0.0, 0.0, 0.0, 1.0};
+  std::vector<double> tcp_frame_matrix{1.0, 0.0, 0.0, 0.0,
+                                       0.0, 1.0, 0.0, 0.0,
+                                       0.0, 0.0, 1.0, 62.0,
+                                       0.0, 0.0, 0.0, 1.0};
+  std::vector<double> load_com_mm{0.0, 0.0, 62.0};
+  std::vector<double> load_inertia{0.0012, 0.0012, 0.0008, 0.0, 0.0, 0.0};
 };
 
 struct ScanWaypoint {

@@ -52,7 +52,7 @@ class ConfigForm(QGroupBox):
         self.preferred_link = QComboBox()
         self.preferred_link.addItems(["wired_direct", "lan_switch", "wifi"])
         self.robot_model = QComboBox()
-        self.robot_model.addItems(["xmate_er3", "xmate_er7_pro", "xmate_standard_6", "custom"])
+        self.robot_model.addItems(["xmate3", "xmate7", "xmate_er3_pro", "xmate_er7_pro", "xmate_standard_6", "custom"])
         self.sdk_robot_class = QComboBox()
         self.sdk_robot_class.addItems(["xMateRobot", "xMateErProRobot", "StandardRobot", "PCB4Robot", "PCB3Robot"])
         self.axis_count = QComboBox()

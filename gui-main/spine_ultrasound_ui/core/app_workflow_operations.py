@@ -186,9 +186,11 @@ def start_scan(host: AppWorkflowHost) -> None:
         host.workflow_artifacts.session_id = locked.session_id
         host.workflow_artifacts.session_dir = str(locked.session_dir)
         host._log("INFO", f"会话 {locked.session_id} 已锁定，manifest 不再允许改写语义字段。")
+    runtime_plan = locked.scan_plan
+    host.execution_scan_plan = runtime_plan
     reply = host._send_command(
         "load_scan_plan",
-        {"scan_plan": runtime_scan_plan_payload(host.execution_scan_plan or locked.scan_plan)},
+        {"scan_plan": runtime_scan_plan_payload(runtime_plan)},
         workflow_step="load_scan_plan",
     )
     if not reply.ok:
