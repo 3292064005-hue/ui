@@ -14,7 +14,9 @@ _MINIMAL_PNG_BASE64 = (
 
 
 def enable_runtime_compat() -> None:
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    has_gui_session = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    if not has_gui_session:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
     if "PySide6" in sys.modules:
         return

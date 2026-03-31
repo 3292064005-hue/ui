@@ -121,6 +121,21 @@ class MainWindowLayoutBuilder:
         subtitle.setWordWrap(True)
         text_col.addWidget(title)
         text_col.addWidget(subtitle)
+        pill_row = QHBoxLayout()
+        pill_row.setSpacing(8)
+        for attr, text, state in [
+            ("header_state_pill", "系统 · BOOT", "warn"),
+            ("header_mode_pill", "模式 · manual", "warn"),
+            ("header_exp_pill", "实验 · -", "warn"),
+            ("header_step_pill", "下一步 · 创建实验", "warn"),
+        ]:
+            pill = QLabel(text)
+            pill.setObjectName("StatusPill")
+            pill.setProperty("state", state)
+            setattr(w, attr, pill)
+            pill_row.addWidget(pill)
+        pill_row.addStretch(1)
+        text_col.addLayout(pill_row)
         text_col.addStretch(1)
 
         metrics_col = QHBoxLayout()
