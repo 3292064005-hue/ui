@@ -1,8 +1,8 @@
-# Local TLS material generated for robot_core / headless IPC
-configs/tls/runtime/*.crt
-configs/tls/runtime/*.key
-configs/tls/*.key
-
-# Python cache
+.pytest_cache/
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
