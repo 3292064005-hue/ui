@@ -25,13 +25,17 @@ class OverviewPresenter:
         window._set_badge_state(window.header_exp_pill, f"实验 · {ctx.exp_id}", "ok" if ctx.current_exp else "warn")
         window._set_badge_state(window.header_step_pill, f"下一步 · {ctx.recommended_label}", ctx.readiness_state)
 
-        window.lbl_next_action.setText(f"下一步：{ctx.recommended_label}")
-        window.lbl_next_reason.setText(ctx.recommended_reason)
-        window.lbl_next_tab.setText(f"建议页面：{ctx.recommended_tab}")
-        window.lbl_readiness_percent.setText(f"{ctx.readiness_percent}%")
-        window.lbl_readiness_detail.setText(f"{ctx.readiness.get('passed', 0)} / {ctx.readiness.get('total', 0)} 检查通过")
         extra_blockers = ctx.blockers + [item.get("name", "") for item in ctx.config_blockers] + [item.get("name", "") for item in ctx.session_blockers] + [item.get("name", "") for item in ctx.backend_blockers] + [item.get("name", "") for item in ctx.bridge_blockers]
-        window.lbl_readiness_blockers.setText("阻塞项：" + ("、".join([item for item in extra_blockers if item]) if extra_blockers else "无"))
+        self._set_optional_text(window, "lbl_next_action", f"下一步：{ctx.recommended_label}")
+        self._set_optional_text(window, "lbl_next_reason", ctx.recommended_reason)
+        self._set_optional_text(window, "lbl_next_tab", f"建议页面：{ctx.recommended_tab}")
+        self._set_optional_text(window, "lbl_readiness_percent", f"{ctx.readiness_percent}%")
+        self._set_optional_text(window, "lbl_readiness_detail", f"{ctx.readiness.get('passed', 0)} / {ctx.readiness.get('total', 0)} 检查通过")
+        self._set_optional_text(
+            window,
+            "lbl_readiness_blockers",
+            "阻塞项：" + ("、".join([item for item in extra_blockers if item]) if extra_blockers else "无"),
+        )
 
         window.card_state.update_text(ctx.system_state, f"Operate mode: {ctx.operate_mode}")
         window.card_state.set_tone("danger" if state_kind == "danger" else "accent")
@@ -69,3 +73,9 @@ class OverviewPresenter:
         window.overview_page.recommended_label.setText(f"建议下一步：{ctx.recommended_label}")
         window.overview_page.readiness_label.setText(f"流程就绪度：{ctx.readiness.get('passed', 0)} / {ctx.readiness.get('total', 0)}，阻塞项 {total_blockers}")
         window.overview_page.overview_text.setHtml(html_summary(summary_lines))
+
+    @staticmethod
+    def _set_optional_text(window, attr_name: str, text: str) -> None:
+        widget = getattr(window, attr_name, None)
+        if widget is not None:
+            widget.setText(text)
