@@ -40,6 +40,9 @@ class CapturedFrame:
     fresh: bool
     pixels: np.ndarray
     provider_mode: str
+    depth_pixels: np.ndarray | None = None
+    intrinsics: dict[str, Any] | None = None
+    depth_storage_ref: str = ""
 
     def envelope(self) -> dict[str, Any]:
         """Return the JSON-serializable frame envelope consumed by artifacts.
@@ -47,7 +50,7 @@ class CapturedFrame:
         Returns:
             Serializable frame metadata without raw pixel buffers.
         """
-        return {
+        payload = {
             "frame_id": self.frame_id,
             "device_id": self.device_id,
             "timestamp_ns": int(self.timestamp_ns),
@@ -58,6 +61,20 @@ class CapturedFrame:
             "fresh": bool(self.fresh),
             "provider_mode": self.provider_mode,
         }
+        if self.depth_pixels is not None:
+            valid_depth = self.depth_pixels[np.isfinite(self.depth_pixels) & (self.depth_pixels > 0.0)]
+            payload.update({
+                "frame_type": "rgbd",
+                "depth_storage_ref": self.depth_storage_ref or self.storage_ref,
+                "stream_roles": ["color", "depth"],
+                "depth_resolution": {"width": int(self.depth_pixels.shape[1]), "height": int(self.depth_pixels.shape[0])},
+                "depth_unit": "mm",
+                "depth_valid_ratio": round(float(valid_depth.size / max(self.depth_pixels.size, 1)), 4),
+                "depth_median_mm": round(float(np.median(valid_depth)), 3) if valid_depth.size else 0.0,
+            })
+        if self.intrinsics:
+            payload["intrinsics"] = dict(self.intrinsics)
+        return payload
 
 
 class CameraProvider:
@@ -96,6 +113,8 @@ class CameraProvider:
             mode = 'synthetic'
         if mode == 'filesystem':
             return self._collect_filesystem_frames(experiment_id=experiment_id, config=config, calibration_bundle=calibration_bundle)
+        if mode in {'realsense_d435i', 'realsense', 'd435i'}:
+            return self._collect_realsense_frames(experiment_id=experiment_id, config=config, calibration_bundle=calibration_bundle)
         if mode in {'opencv_camera', 'webcam', 'live'}:
             return self._collect_webcam_frames(experiment_id=experiment_id, config=config, calibration_bundle=calibration_bundle)
         if mode == 'synthetic':
@@ -145,12 +164,14 @@ class CameraProvider:
             raise RuntimeError(f'no guidance frames found under {source_path}')
         frames: list[CapturedFrame] = []
         for index, file_path in enumerate(candidates[:frame_limit], start=1):
-            pixels = self._load_pixels(file_path)
+            pixels, depth_pixels, intrinsics = self._load_frame_payload(file_path)
             frame = self._make_frame(
                 experiment_id=experiment_id,
                 calibration_bundle=calibration_bundle,
                 storage_ref=str(file_path),
                 pixels=pixels,
+                depth_pixels=depth_pixels,
+                intrinsics_override=intrinsics,
                 provider_mode='filesystem',
                 index=index,
             )
@@ -191,6 +212,68 @@ class CameraProvider:
             raise RuntimeError(f'camera device {device_index} produced only {len(frames)} of {frame_limit} requested frames before timeout')
         return frames
 
+    def _collect_realsense_frames(self, *, experiment_id: str, config: Any, calibration_bundle: dict[str, Any]) -> list[CapturedFrame]:
+        try:  # pragma: no cover - exercised only with RealSense runtime installed
+            import pyrealsense2 as rs  # type: ignore
+        except Exception as exc:  # pragma: no cover - optional hardware dependency
+            raise RuntimeError('pyrealsense2 is required for realsense_d435i guidance input mode') from exc
+        frame_limit = max(1, int(getattr(config, 'camera_guidance_frame_count', 3) or 3))
+        timeout_ms = max(100, int(getattr(config, 'camera_capture_timeout_ms', 1000) or 1000))
+        width = int(getattr(config, 'camera_realsense_stream_width', 640) or 640)
+        height = int(getattr(config, 'camera_realsense_stream_height', 480) or 480)
+        fps = int(getattr(config, 'camera_realsense_fps', 30) or 30)
+        serial = str(getattr(config, 'camera_realsense_serial', '') or '')
+        pipeline = rs.pipeline()
+        rs_config = rs.config()
+        if serial:
+            rs_config.enable_device(serial)
+        rs_config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
+        rs_config.enable_stream(rs.stream.depth, width, height, rs.format.z16, fps)
+        profile = pipeline.start(rs_config)
+        align = rs.align(rs.stream.color)
+        frames: list[CapturedFrame] = []
+        try:
+            depth_sensor = profile.get_device().first_depth_sensor()
+            depth_scale = float(depth_sensor.get_depth_scale() or 0.001)
+            for index in range(1, frame_limit + 1):
+                frameset = align.process(pipeline.wait_for_frames(timeout_ms))
+                color_frame = frameset.get_color_frame()
+                depth_frame = frameset.get_depth_frame()
+                if not color_frame or not depth_frame:
+                    continue
+                color = np.asanyarray(color_frame.get_data())
+                depth_mm = np.asanyarray(depth_frame.get_data()).astype(np.float32) * depth_scale * 1000.0
+                video_profile = color_frame.profile.as_video_stream_profile()
+                intr = video_profile.intrinsics
+                intrinsics = {
+                    'fx': float(intr.fx),
+                    'fy': float(intr.fy),
+                    'ppx': float(intr.ppx),
+                    'ppy': float(intr.ppy),
+                    'width': int(intr.width),
+                    'height': int(intr.height),
+                    'model': str(intr.model),
+                    'coeffs': [float(value) for value in intr.coeffs],
+                    'depth_scale_m': depth_scale,
+                }
+                frame = self._make_frame(
+                    experiment_id=experiment_id,
+                    calibration_bundle=calibration_bundle,
+                    storage_ref=f'realsense://{serial or "default"}/color/frame-{index:03d}',
+                    pixels=self._normalize_pixels(color),
+                    depth_pixels=depth_mm,
+                    depth_storage_ref=f'realsense://{serial or "default"}/depth/frame-{index:03d}',
+                    intrinsics_override=intrinsics,
+                    provider_mode='realsense_d435i',
+                    index=index,
+                )
+                frames.append(frame)
+        finally:
+            pipeline.stop()
+        if len(frames) < frame_limit:
+            raise RuntimeError(f'RealSense D435i produced only {len(frames)} of {frame_limit} requested frames before timeout')
+        return frames
+
     def _collect_synthetic_frames(self, *, experiment_id: str, config: Any, calibration_bundle: dict[str, Any], source_type: str) -> list[CapturedFrame]:
         frame_limit = max(1, int(getattr(config, 'camera_guidance_frame_count', 3) or 3))
         width = int(calibration_bundle.get('camera_intrinsics', {}).get('resolution', {}).get('width', 640) or 640)
@@ -211,11 +294,14 @@ class CameraProvider:
             pixels[y0:y1, x1:min(width, x1 + 3)] = 0.4
             gradient = np.linspace(0.08, 0.18, height, dtype=np.float32)[:, None]
             pixels = np.clip(pixels + gradient, 0.0, 1.0)
+            depth_pixels = self._synthetic_depth_for_pixels(pixels, index=index)
             frame = self._make_frame(
                 experiment_id=experiment_id,
                 calibration_bundle=calibration_bundle,
                 storage_ref=f'synthetic://{experiment_id}/{source_type}/frame-{index:03d}',
                 pixels=pixels,
+                depth_pixels=depth_pixels,
+                depth_storage_ref=f'synthetic://{experiment_id}/{source_type}/depth-{index:03d}',
                 provider_mode='synthetic',
                 index=index,
             )
@@ -231,12 +317,19 @@ class CameraProvider:
         pixels: np.ndarray,
         provider_mode: str,
         index: int,
+        depth_pixels: np.ndarray | None = None,
+        depth_storage_ref: str = "",
+        intrinsics_override: dict[str, Any] | None = None,
     ) -> CapturedFrame:
         pixels = self._normalize_pixels(pixels)
+        depth = self._normalize_depth(depth_pixels) if depth_pixels is not None else None
         height, width = pixels.shape[:2]
         device_id = str(calibration_bundle.get('camera_device_id', 'rgbd_back_camera'))
         intrinsics_hash = str(calibration_bundle.get('camera_intrinsics_hash', ''))
-        frame_type = str(calibration_bundle.get('camera_intrinsics', {}).get('frame_type', 'rgbd'))
+        intrinsics = dict(calibration_bundle.get('camera_intrinsics', {}))
+        if intrinsics_override:
+            intrinsics.update(dict(intrinsics_override))
+        frame_type = 'rgbd' if depth is not None else str(intrinsics.get('frame_type', 'rgb'))
         return CapturedFrame(
             frame_id=f'{experiment_id}-{provider_mode}-{index:03d}',
             device_id=device_id,
@@ -248,25 +341,44 @@ class CameraProvider:
             fresh=True,
             pixels=pixels,
             provider_mode=provider_mode,
+            depth_pixels=depth,
+            depth_storage_ref=depth_storage_ref,
+            intrinsics=intrinsics,
         )
 
-    def _load_pixels(self, file_path: Path) -> np.ndarray:
+    def _load_frame_payload(self, file_path: Path) -> tuple[np.ndarray, np.ndarray | None, dict[str, Any]]:
         suffix = file_path.suffix.lower()
         if suffix == '.npy':
             array = np.load(file_path)
-            return self._normalize_pixels(array)
+            return self._normalize_pixels(array), None, {}
         if suffix == '.npz':
             archive = np.load(file_path)
             if not archive.files:
                 raise RuntimeError(f'npz guidance source contains no arrays: {file_path}')
-            return self._normalize_pixels(archive[archive.files[0]])
+            files = set(archive.files)
+            color_key = next((key for key in ['rgb', 'color', 'image', 'pixels', 'frame'] if key in files), archive.files[0])
+            depth_key = next((key for key in ['depth_mm', 'depth', 'z_mm', 'depth_m'] if key in files), '')
+            intrinsics: dict[str, Any] = {}
+            if 'intrinsics_json' in files:
+                import json
+
+                intrinsics = json.loads(str(np.asarray(archive['intrinsics_json']).item()))
+            else:
+                for key in ['fx', 'fy', 'ppx', 'ppy', 'mm_per_pixel_x', 'mm_per_pixel_y']:
+                    if key in files:
+                        intrinsics[key] = float(np.asarray(archive[key]).reshape(-1)[0])
+            return (
+                self._normalize_pixels(archive[color_key]),
+                self._normalize_depth(archive[depth_key]) if depth_key else None,
+                intrinsics,
+            )
         if suffix in {'.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff'}:
             if cv2 is None:
                 raise RuntimeError('opencv-python-headless is required for image guidance input mode')
             image = cv2.imread(str(file_path), cv2.IMREAD_UNCHANGED)
             if image is None:
                 raise RuntimeError(f'failed to read guidance frame: {file_path}')
-            return self._normalize_pixels(image)
+            return self._normalize_pixels(image), None, {}
         raise RuntimeError(f'unsupported guidance frame format: {file_path.suffix}')
 
     @staticmethod
@@ -287,3 +399,25 @@ class CameraProvider:
         elif max_value > 0.0:
             array = array / max_value
         return np.clip(array, 0.0, 1.0)
+
+    @staticmethod
+    def _normalize_depth(depth: np.ndarray | None) -> np.ndarray | None:
+        if depth is None:
+            return None
+        array = np.asarray(depth)
+        if array.ndim == 3:
+            array = array[..., 0]
+        if array.ndim != 2:
+            raise RuntimeError(f'depth frame must be 2-D after normalization, got shape {array.shape}')
+        array = array.astype(np.float32)
+        finite = array[np.isfinite(array) & (array > 0.0)]
+        if finite.size and float(np.nanmax(finite)) <= 20.0:
+            array = array * 1000.0
+        return np.where(np.isfinite(array), np.maximum(array, 0.0), 0.0).astype(np.float32)
+
+    @staticmethod
+    def _synthetic_depth_for_pixels(pixels: np.ndarray, *, index: int) -> np.ndarray:
+        height, width = pixels.shape
+        y_gradient = np.linspace(-8.0, 8.0, height, dtype=np.float32)[:, None]
+        x_gradient = np.linspace(-4.0, 4.0, width, dtype=np.float32)[None, :]
+        return (205.0 + y_gradient + 0.25 * x_gradient + float(index - 1) * 0.5).astype(np.float32)

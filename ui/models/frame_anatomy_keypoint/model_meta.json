@@ -11,6 +11,10 @@
   "runtime_model_path": "frame_anatomy_keypoint_weights.npz",
   "trainer_backend": "numpy_baseline",
   "task_name": "frame_anatomy_keypoint_export",
+  "training_run_id": "frame_anatomy_keypoint:committed_fixture_v1",
+  "dataset_source": "fixture",
+  "dataset_hash": "committed_frame_anatomy_fixture_v1",
+  "strict_runtime_required": true,
   "training_metrics": {
     "sample_count": 6,
     "avg_pair_separation_px": 25.0,

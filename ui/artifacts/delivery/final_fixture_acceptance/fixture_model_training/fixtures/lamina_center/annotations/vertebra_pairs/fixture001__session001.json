@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "case_id": "fixture001/session001",
+  "pairs": [
+    {
+      "vertebra_instance_id": "v1",
+      "left_point_id": "p1",
+      "right_point_id": "p2",
+      "pair_confidence": 0.9
+    }
+  ]
+}

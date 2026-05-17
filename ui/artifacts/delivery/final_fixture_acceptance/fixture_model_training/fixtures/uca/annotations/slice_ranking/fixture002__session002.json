@@ -1,0 +1,16 @@
+{
+  "ranked_slices": [
+    {
+      "slice_index": 5,
+      "score": 0.9
+    },
+    {
+      "slice_index": 4,
+      "score": 0.8
+    }
+  ],
+  "best_slice": {
+    "slice_index": 5,
+    "score": 0.9
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "bundle_id": "uca_rank:uca_rank",
+  "bundle_version": "v1",
+  "package_name": "uca_rank",
+  "runtime_profile": "clinical_mainline",
+  "training_run_id": "uca_rank:993969bcf1b46b1b",
+  "dataset_source": "fixture",
+  "dataset_hash": "757cb82081f92e43d11e0ebe0bed84b0cb6652d34a4433b0fe5de20e64ddda54",
+  "trainer_backend": "numpy_baseline",
+  "release_state": "research_fixture",
+  "clinical_claim": "non_clinical_research_only",
+  "benchmark_manifest_path": "",
+  "strict_runtime_required": true,
+  "artifacts": {
+    "weights_path": "parameters.json",
+    "entrypoint": "spine_ultrasound_ui.training.runtime_adapters.uca_rank",
+    "parameter_path": "parameters.json",
+    "meta_path": "model_meta.json"
+  },
+  "compatibility": {
+    "robot_models": [
+      "xmate3",
+      "xmate7",
+      "xmateer3pro",
+      "xmateer7pro"
+    ],
+    "runtime_modes": [
+      "core",
+      "headless_review"
+    ]
+  },
+  "preprocess": {},
+  "postprocess": {},
+  "metrics": {
+    "sample_count": 1,
+    "avg_best_slice_index": 5.0,
+    "avg_uca_angle_deg": 18.2
+  }
+}

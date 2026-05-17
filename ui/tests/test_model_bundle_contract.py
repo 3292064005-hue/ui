@@ -17,3 +17,6 @@ def test_load_model_bundle_manifest_requires_required_fields() -> None:
     manifest = load_model_bundle_manifest(manifests[0].parent)
     assert manifest['bundle_version'] == 'v1'
     assert manifest['artifacts']['entrypoint']
+    assert manifest['strict_runtime_required'] is True
+    assert manifest['release_state']
+    assert manifest['clinical_claim'] != 'clinical'

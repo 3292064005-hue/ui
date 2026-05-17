@@ -175,6 +175,11 @@ bool SdkRobotFacade::requireLiveWrite(const std::string& prefix, std::string* re
   if (live_binding_established_ && robot_ != nullptr) {
     return true;
   }
+  if (!deploymentProfileForbidsContractShellWrites()) {
+    binding_detail_ = "contract_shell_write_allowed_dev_profile";
+    refreshBindingTruth();
+    return true;
+  }
   captureFailure(prefix, vendored_sdk_detected_ ? "live_binding_required" : "sdk_live_binding_unavailable", reason);
   binding_detail_ = vendored_sdk_detected_ ? "live_write_blocked_contract_shell" : "live_write_blocked_no_sdk";
   refreshBindingTruth();

@@ -2,11 +2,52 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 from spine_ultrasound_ui.training.specs.common import load_structured_config
 from spine_ultrasound_ui.runtime.model_bundle_contract import load_model_bundle_manifest
+
+
+class ModelRuntimeLoadError(RuntimeError):
+    """Raised when a runtime model package cannot satisfy strict loading."""
+
+
+def strict_model_runtime_required(config: dict[str, Any] | None = None, meta: dict[str, Any] | None = None) -> bool:
+    """Resolve whether a runtime model is mandatory for this package/config."""
+    cfg = dict(config or {})
+    metadata = dict(meta or {})
+    if 'strict_runtime_required' in cfg:
+        return bool(cfg.get('strict_runtime_required'))
+    manifest = dict(metadata.get('bundle_manifest', {}) or {})
+    if 'strict_runtime_required' in manifest:
+        return bool(manifest.get('strict_runtime_required'))
+    if 'strict_runtime_required' in metadata:
+        return bool(metadata.get('strict_runtime_required'))
+    return True
+
+
+def strict_model_runtime_required_for_target(target: str | Path | None) -> bool:
+    """Resolve strict loading before a package can be fully loaded."""
+    env_value = os.environ.get('SPINE_STRICT_MODEL_RUNTIME')
+    if env_value is not None:
+        return env_value.strip().lower() not in {'0', 'false', 'off', 'no'}
+    if target is None or not str(target):
+        return True
+    target_path = Path(str(target))
+    if target_path.is_file() and target_path.suffix.lower() in {'.json', '.yaml', '.yml'}:
+        try:
+            config = load_structured_config(target_path)
+        except Exception:
+            return True
+        return strict_model_runtime_required(config, None)
+    return True
+
+
+def _resolve_relative(base: Path, value: str) -> Path:
+    path = Path(value)
+    return path if path.is_absolute() else (base / path).resolve()
 
 
 def resolve_model_package(target: str | Path) -> dict[str, Any]:
@@ -47,8 +88,35 @@ def resolve_model_package(target: str | Path) -> dict[str, Any]:
         raise ValueError(f'invalid model package: {package_dir}')
     meta = json.loads(meta_path.read_text(encoding='utf-8'))
     if bundle_manifest_path.exists():
-        meta['bundle_manifest'] = load_model_bundle_manifest(package_dir)
+        manifest = load_model_bundle_manifest(package_dir)
+        meta['bundle_manifest'] = manifest
+        meta.setdefault('training_run_id', str(manifest.get('training_run_id', '') or ''))
+        meta.setdefault('dataset_source', str(manifest.get('dataset_source', '') or ''))
+        meta.setdefault('dataset_hash', str(manifest.get('dataset_hash', '') or ''))
+        meta.setdefault('trainer_backend', str(manifest.get('trainer_backend', meta.get('trainer_backend', '')) or ''))
+        meta.setdefault('release_state', str(manifest.get('release_state', meta.get('release_state', '')) or ''))
+        meta.setdefault('clinical_claim', str(manifest.get('clinical_claim', meta.get('clinical_claim', '')) or ''))
+        meta.setdefault('strict_runtime_required', bool(manifest.get('strict_runtime_required', True)))
+    else:
+        raise ValueError(f'invalid model package missing bundle_manifest.json: {package_dir}')
     parameters = json.loads(parameter_path.read_text(encoding='utf-8'))
+
+    artifacts = dict(meta.get('bundle_manifest', {}).get('artifacts', {}) or {})
+    declared_parameter = str(artifacts.get('parameter_path', '') or '')
+    if declared_parameter and _resolve_relative(package_dir, declared_parameter) != parameter_path.resolve():
+        declared_parameter_path = _resolve_relative(package_dir, declared_parameter)
+        if not declared_parameter_path.exists():
+            raise FileNotFoundError(declared_parameter_path)
+    declared_meta = str(artifacts.get('meta_path', '') or '')
+    if declared_meta and _resolve_relative(package_dir, declared_meta) != meta_path.resolve():
+        declared_meta_path = _resolve_relative(package_dir, declared_meta)
+        if not declared_meta_path.exists():
+            raise FileNotFoundError(declared_meta_path)
+    declared_weights = str(artifacts.get('weights_path', '') or '')
+    if declared_weights:
+        declared_weights_path = _resolve_relative(package_dir, declared_weights)
+        if not declared_weights_path.exists():
+            raise FileNotFoundError(declared_weights_path)
 
     runtime_model_hint = str(meta.get('runtime_model_path', '') or config_payload.get('runtime_model_path', '') or '')
     runtime_model_path: Path | None = Path(runtime_model_hint) if runtime_model_hint else None
@@ -59,6 +127,9 @@ def resolve_model_package(target: str | Path) -> dict[str, Any]:
         meta['runtime_model_path'] = str(runtime_model_path)
 
     benchmark_manifest_hint = str(config_payload.get('benchmark_manifest', '') or meta.get('benchmark_manifest_path', '') or '')
+    manifest_benchmark_hint = str(meta.get('bundle_manifest', {}).get('benchmark_manifest_path', '') or '')
+    if not benchmark_manifest_hint and manifest_benchmark_hint:
+        benchmark_manifest_hint = manifest_benchmark_hint
     benchmark_manifest_path: Path | None = Path(benchmark_manifest_hint) if benchmark_manifest_hint else None
     if benchmark_manifest_hint:
         benchmark_manifest_path = benchmark_manifest_path if benchmark_manifest_path.is_absolute() else (target_path.parent / benchmark_manifest_path if target_path.is_file() else package_dir / benchmark_manifest_path)
@@ -76,6 +147,7 @@ def resolve_model_package(target: str | Path) -> dict[str, Any]:
     meta.setdefault('package_name', package_dir.name)
     meta['package_dir'] = str(package_dir)
     meta['package_hash'] = package_hash
+    meta['strict_runtime_required'] = strict_model_runtime_required(config_payload, meta)
     if config_payload:
         meta['config_ref'] = str(target_path)
     return {

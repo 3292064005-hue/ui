@@ -26,8 +26,8 @@ int main() {
 
         std::cout << "[Test] Publishing pose data continuously..." << std::endl;
 
-        // Publish data continuously
-        while (keep_running) {
+        // Publish a bounded burst so ctest can use this as a smoke test.
+        for (int sample = 0; sample < 5 && keep_running; ++sample) {
             test_pose.timestamp_ns += 1000000ULL; // +1ms
             shm.publish_pose(test_pose);
             std::this_thread::sleep_for(std::chrono::milliseconds(10)); // 100Hz for testing

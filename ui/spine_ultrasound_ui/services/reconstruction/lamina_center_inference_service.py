@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from spine_ultrasound_ui.services.reconstruction.closure_profile import load_reconstruction_profile, profile_name
+from spine_ultrasound_ui.training.runtime_adapters.common import ModelRuntimeLoadError, strict_model_runtime_required_for_target
 from spine_ultrasound_ui.training.runtime_adapters.keypoint_runtime_adapter import KeypointRuntimeAdapter
 from spine_ultrasound_ui.utils import now_text
 
@@ -31,6 +32,7 @@ class LaminaCenterInferenceService:
             Path(__file__).resolve().parents[3] / 'configs' / 'models' / 'lamina_keypoint_runtime.yaml',
         )
         self.runtime_load_error = ''
+        self.strict_runtime_required = strict_model_runtime_required_for_target(self.runtime_model_config)
         self._try_load_runtime_adapter()
 
     def infer(
@@ -64,6 +66,8 @@ class LaminaCenterInferenceService:
         binary_mask = np.asarray(bone_mask_bundle.get('binary_mask'))
         if image.ndim != 2 or binary_mask.ndim != 2:
             raise ValueError('projection and bone mask must both be 2D arrays')
+        if self.strict_runtime_required and (self.runtime_adapter is None or not self.runtime_adapter.is_loaded):
+            raise ModelRuntimeLoadError(f'model_runtime_blocked:lamina_keypoint:{self.runtime_load_error or "runtime_adapter_not_loaded"}')
         row_geometry = [dict(item) for item in projection_bundle.get('row_geometry', []) if isinstance(item, dict)]
         rows = [dict(item) for item in input_index.get('selected_rows', input_index.get('rows', [])) if isinstance(item, dict)]
         if not rows or image.shape[0] == 0:
@@ -231,6 +235,7 @@ class LaminaCenterInferenceService:
         if self.runtime_adapter is None and self.runtime_model_config:
             self.runtime_adapter = KeypointRuntimeAdapter()
         if self.runtime_adapter is None or not self.runtime_model_config:
+            self.runtime_load_error = 'no_runtime_model_config'
             return
         config_path = Path(str(self.runtime_model_config))
         if not config_path.exists():

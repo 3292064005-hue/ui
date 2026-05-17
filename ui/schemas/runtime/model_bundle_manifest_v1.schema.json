@@ -6,6 +6,13 @@
     "bundle_id",
     "bundle_version",
     "runtime_profile",
+    "training_run_id",
+    "dataset_source",
+    "dataset_hash",
+    "trainer_backend",
+    "release_state",
+    "clinical_claim",
+    "strict_runtime_required",
     "artifacts",
     "compatibility",
     "metrics"
@@ -25,6 +32,34 @@
     },
     "package_name": {
       "type": "string"
+    },
+    "training_run_id": {
+      "type": "string"
+    },
+    "dataset_source": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dataset_hash": {
+      "type": "string"
+    },
+    "trainer_backend": {
+      "type": "string",
+      "minLength": 1
+    },
+    "release_state": {
+      "type": "string",
+      "minLength": 1
+    },
+    "clinical_claim": {
+      "type": "string",
+      "minLength": 1
+    },
+    "benchmark_manifest_path": {
+      "type": "string"
+    },
+    "strict_runtime_required": {
+      "type": "boolean"
     },
     "artifacts": {
       "type": "object",

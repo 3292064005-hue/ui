@@ -1,5 +1,6 @@
 package_dir: ../../models/frame_anatomy_keypoint
 backend: numpy_template_export
+strict_runtime_required: true
 runtime_model_path: ../../models/frame_anatomy_keypoint/frame_anatomy_keypoint_weights.npz
 benchmark_manifest: ../../models/frame_anatomy_keypoint/benchmark_manifest.json
 required_release_state: research_validated

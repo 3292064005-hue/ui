@@ -1,0 +1,3 @@
+package_dir: ../packages/lamina_keypoint
+backend: numpy_baseline
+strict_runtime_required: true

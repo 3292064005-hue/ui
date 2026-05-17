@@ -30,7 +30,22 @@
     "intrinsics_hash": {"type": "string", "minLength": 1},
     "storage_ref": {"type": "string", "minLength": 1},
     "fresh": {"type": "boolean"},
-    "provider_mode": {"type": "string", "enum": ["synthetic", "filesystem", "opencv_camera"]}
+    "provider_mode": {"type": "string", "enum": ["synthetic", "filesystem", "opencv_camera", "realsense_d435i"]},
+    "depth_storage_ref": {"type": "string", "minLength": 1},
+    "stream_roles": {"type": "array", "items": {"type": "string", "enum": ["color", "depth"]}, "minItems": 1},
+    "depth_unit": {"type": "string", "minLength": 1},
+    "depth_valid_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+    "depth_median_mm": {"type": "number"},
+    "depth_resolution": {
+      "type": "object",
+      "required": ["width", "height"],
+      "properties": {
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "intrinsics": {"type": "object"}
   },
   "additionalProperties": false
 }

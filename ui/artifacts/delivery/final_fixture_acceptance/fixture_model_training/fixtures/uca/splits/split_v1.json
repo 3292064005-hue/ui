@@ -1,0 +1,7 @@
+{
+  "train": [
+    "fixture002/session002"
+  ],
+  "val": [],
+  "test": []
+}

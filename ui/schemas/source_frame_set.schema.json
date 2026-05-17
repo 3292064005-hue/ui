@@ -22,8 +22,8 @@
     "frame_envelopes": {"type": "array", "items": {"$ref": "camera_frame_envelope.schema.json"}, "minItems": 1},
     "frame_count": {"type": "integer", "minimum": 1},
     "fresh": {"type": "boolean"},
-    "provider_mode": {"type": "string", "enum": ["synthetic", "filesystem", "opencv_camera"]},
-    "requested_mode": {"type": "string", "enum": ["synthetic", "filesystem", "opencv_camera", "webcam", "live"]},
+    "provider_mode": {"type": "string", "enum": ["synthetic", "filesystem", "opencv_camera", "realsense_d435i"]},
+    "requested_mode": {"type": "string", "enum": ["synthetic", "filesystem", "opencv_camera", "webcam", "live", "realsense_d435i"]},
     "device_fact_sources": {
       "type": "object",
       "required": ["camera", "robot", "ultrasound", "pressure"],

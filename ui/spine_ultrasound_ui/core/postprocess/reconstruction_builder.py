@@ -4,8 +4,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+import numpy as _np
+
 from spine_ultrasound_ui.utils import now_text
 from spine_ultrasound_ui.core.postprocess.io_helpers import read_npz_bundle
+from spine_ultrasound_ui.training.runtime_adapters.common import ModelRuntimeLoadError
 
 
 def build_reconstruction_artifacts(service, session_dir: Path) -> dict[str, Path]:
@@ -122,16 +125,21 @@ def build_assessment_artifacts(service, session_dir: Path) -> dict[str, Path]:
     vertebra_pairs = {'generated_at': now_text(), 'pairs': list(measurement.get('vertebra_pairs', [])), 'summary': {'pair_count': len(measurement.get('vertebra_pairs', []))}}
     tilt_candidates = {'generated_at': now_text(), 'candidates': list(measurement.get('tilt_candidates', [])), 'summary': {'candidate_count': len(measurement.get('tilt_candidates', []))}}
     vpi_bundle = read_npz_bundle(session_dir / 'derived' / 'reconstruction' / 'coronal_vpi.npz')
-    ranked_slices = service.vpi_slice_selector_service.rank(vpi_bundle)
-    bone_feature_mask = service.bone_feature_segmentation_service.infer(vpi_bundle, ranked_slices)
-    uca_measurement = service.uca_measurement_service.measure(assessment_input, ranked_slices, bone_feature_mask)
+    try:
+        ranked_slices = service.vpi_slice_selector_service.rank(vpi_bundle)
+        bone_feature_mask = service.bone_feature_segmentation_service.infer(vpi_bundle, ranked_slices)
+        uca_measurement = service.uca_measurement_service.measure(assessment_input, ranked_slices, bone_feature_mask)
+    except ModelRuntimeLoadError as exc:
+        reason = str(exc) or 'model_runtime_blocked'
+        ranked_slices = {'generated_at': now_text(), 'session_id': str(assessment_input.get('session_id', '') or ''), 'ranked_slices': [], 'best_slice': {}, 'top_k': [], 'runtime_model': {'runtime_kind': 'blocked', 'release_state': 'blocked', 'load_error': reason}}
+        bone_feature_mask = {'generated_at': now_text(), 'session_id': str(assessment_input.get('session_id', '') or ''), 'mask': _np.zeros((1, 1), dtype=_np.uint8), 'summary': {'coverage_ratio': 0.0}, 'runtime_model': {'runtime_kind': 'blocked', 'release_state': 'blocked', 'load_error': reason}}
+        uca_measurement = {'generated_at': now_text(), 'session_id': str(assessment_input.get('session_id', '') or ''), 'angle_deg': 0.0, 'confidence': 0.0, 'measurement_source': 'model_runtime_blocked', 'measurement_status': 'blocked', 'requires_manual_review': True, 'manual_review_reasons': [reason], 'runtime_model': dict(ranked_slices['runtime_model'])}
     agreement = build_assessment_agreement_payload(measurement, uca_measurement)
     summary = build_assessment_summary_payload(assessment_input, measurement, uca_measurement, agreement)
     overlay_tmp = session_dir / 'derived' / 'assessment' / '.assessment_overlay_tmp.png'
     overlay_path = service.assessment_evidence_renderer.render(assessment_input, measurement, overlay_tmp)
     service.exp_manager.save_json_artifact(session_dir, 'derived/reconstruction/vpi_ranked_slices.json', ranked_slices)
     feature_mask_target = session_dir / 'derived' / 'reconstruction' / 'vpi_bone_feature_mask.npz'
-    import numpy as _np
     _np.savez_compressed(feature_mask_target, mask=_np.asarray(bone_feature_mask.get('mask', _np.zeros((1, 1), dtype=_np.uint8))), summary=json.dumps(bone_feature_mask.get('summary', {}), ensure_ascii=False))
     return service.assessment_writer.write(
         session_dir,

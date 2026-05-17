@@ -1,0 +1,46 @@
+{
+  "generated_at": "2026-05-17 17:05:35",
+  "backend": "numpy_baseline",
+  "task": "all",
+  "output_root": "artifacts/delivery/final_fixture_acceptance/fixture_model_training",
+  "results": [
+    {
+      "task": "frame_anatomy_keypoint",
+      "ok": true,
+      "mode": "exported_package",
+      "package_dir": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/frame_anatomy_keypoint",
+      "runtime_model_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/frame_anatomy_keypoint/frame_anatomy_keypoint_weights.npz",
+      "benchmark_manifest_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/frame_anatomy_keypoint/benchmark_manifest.json"
+    },
+    {
+      "task": "lamina_seg",
+      "ok": true,
+      "mode": "exported_package",
+      "package_dir": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/lamina_seg",
+      "parameter_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/lamina_seg/parameters.json",
+      "model_meta_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/lamina_seg/model_meta.json",
+      "runtime_model_path": "",
+      "bundle_manifest_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/lamina_seg/bundle_manifest.json"
+    },
+    {
+      "task": "lamina_keypoint",
+      "ok": true,
+      "mode": "exported_package",
+      "package_dir": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/lamina_keypoint",
+      "parameter_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/lamina_keypoint/parameters.json",
+      "model_meta_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/lamina_keypoint/model_meta.json",
+      "runtime_model_path": "",
+      "bundle_manifest_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/lamina_keypoint/bundle_manifest.json"
+    },
+    {
+      "task": "uca_rank",
+      "ok": true,
+      "mode": "exported_package",
+      "package_dir": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/uca_rank",
+      "parameter_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/uca_rank/parameters.json",
+      "model_meta_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/uca_rank/model_meta.json",
+      "runtime_model_path": "",
+      "bundle_manifest_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/uca_rank/bundle_manifest.json"
+    }
+  ]
+}

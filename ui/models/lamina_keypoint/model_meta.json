@@ -6,5 +6,10 @@
   "task": "lamina_center_keypoint",
   "release_state": "research_baseline",
   "clinical_claim": "non_clinical",
-  "input_contract": "coronal_vpi_and_bone_mask"
+  "input_contract": "coronal_vpi_and_bone_mask",
+  "trainer_backend": "numpy_baseline",
+  "training_run_id": "lamina_keypoint:committed_fixture_v1",
+  "dataset_source": "fixture",
+  "dataset_hash": "committed_lamina_keypoint_fixture_v1",
+  "strict_runtime_required": true
 }

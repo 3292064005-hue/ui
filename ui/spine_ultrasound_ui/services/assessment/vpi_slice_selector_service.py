@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 
+from spine_ultrasound_ui.training.runtime_adapters.common import ModelRuntimeLoadError, strict_model_runtime_required_for_target
 from spine_ultrasound_ui.training.runtime_adapters.ranking_runtime_adapter import RankingRuntimeAdapter
 from spine_ultrasound_ui.utils import now_text
 
@@ -29,12 +30,15 @@ class VPISliceSelectorService:
             Path(__file__).resolve().parents[3] / 'configs' / 'models' / 'uca_rank_runtime.yaml',
         )
         self.runtime_load_error = ''
+        self.strict_runtime_required = strict_model_runtime_required_for_target(self.runtime_model_config)
         self._try_load_runtime_adapter()
 
     def rank(self, vpi_bundle: dict[str, Any]) -> dict[str, Any]:
         image = np.asarray(vpi_bundle.get('image'))
         if image.ndim != 2:
             raise ValueError('vpi_bundle.image must be 2D')
+        if self.strict_runtime_required and (self.runtime_adapter is None or not self.runtime_adapter.is_loaded):
+            raise ModelRuntimeLoadError(f'model_runtime_blocked:uca_rank:{self.runtime_load_error or "runtime_adapter_not_loaded"}')
         slices = [dict(item) for item in vpi_bundle.get('slices', []) if isinstance(item, dict)]
         runtime_model = self._fallback_runtime_model()
         if self.runtime_adapter is not None and self.runtime_adapter.is_loaded:
@@ -57,6 +61,7 @@ class VPISliceSelectorService:
         if self.runtime_adapter is None and self.runtime_model_config:
             self.runtime_adapter = RankingRuntimeAdapter()
         if self.runtime_adapter is None or not self.runtime_model_config:
+            self.runtime_load_error = 'no_runtime_model_config'
             return
         config_path = Path(str(self.runtime_model_config))
         if not config_path.exists():

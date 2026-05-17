@@ -1,0 +1,129 @@
+{
+  "items": [
+    {
+      "name": "d435i_rgbd_guidance",
+      "project_book_claim": "D435i back ROI, midline, surface normal and scan corridor",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "derived/sync/source_frame_set.json",
+        "derived/guidance/body_surface.json",
+        "derived/guidance/guidance_targets.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "calibration_freeze",
+      "project_book_claim": "Robot base, camera, probe TCP and ultrasound image-frame calibration bundle",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "meta/calibration_bundle.json",
+        "meta/localization_freeze.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "path_planning",
+      "project_book_claim": "Standardized scan path with smoothing, overlap, speed and normal constraints",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "meta/scan_plan.json",
+        "derived/preview/scan_protocol.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "pressure_feedback",
+      "project_book_claim": "Pressure/contact timeline for force-position mixed control evidence",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "derived/pressure/pressure_sensor_timeline.json",
+        "export/pressure_analysis.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "continuous_ultrasound_capture",
+      "project_book_claim": "Continuous ultrasound frames and frame quality evidence",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "raw/ultrasound/index.jsonl",
+        "derived/ultrasound/ultrasound_frame_metrics.json",
+        "export/ultrasound_analysis.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "multimodal_sync",
+      "project_book_claim": "Ultrasound, camera, pressure and robot pose synchronized rows",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "derived/sync/frame_sync_index.json",
+        "derived/reconstruction/reconstruction_input_index.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "anatomy_models",
+      "project_book_claim": "Bone mask, frame anatomy keypoints and lamina candidates from strict runtime model packages",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "derived/reconstruction/bone_mask.npz",
+        "derived/reconstruction/frame_anatomy_points.json",
+        "derived/reconstruction/lamina_candidates.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "vpi_reconstruction",
+      "project_book_claim": "VPI volume, preview and reconstruction summary",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "derived/reconstruction/coronal_vpi.npz",
+        "derived/reconstruction/vpi_preview.png",
+        "derived/reconstruction/reconstruction_summary.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "cobb_assessment",
+      "project_book_claim": "Offline Cobb/UCA assessment and manual-review reasons",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "derived/assessment/cobb_measurement.json",
+        "derived/assessment/uca_measurement.json",
+        "derived/assessment/assessment_summary.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "ui_report_export",
+      "project_book_claim": "Operator-facing summary and exportable session report",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "export/summary.txt",
+        "export/session_report.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "live_hil_boundary",
+      "project_book_claim": "Real hardware/HIL and clinical consistency evidence",
+      "status": "open_live_hil_gap",
+      "evidence_tier": "not_claimed",
+      "artifacts": [
+        "docs/05_verification/CURRENT_KNOWN_GAPS.md"
+      ],
+      "artifacts_present": true
+    }
+  ]
+}

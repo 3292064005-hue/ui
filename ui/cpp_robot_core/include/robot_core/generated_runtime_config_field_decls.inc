@@ -109,8 +109,24 @@
   std::string camera_guidance_source_path{""}; \
   std::string camera_guidance_file_glob{"*.npy"}; \
   int camera_guidance_frame_count{3}; \
+  std::string camera_device_id{"rgbd_back_camera"}; \
+  bool camera_depth_enabled{true}; \
+  std::string camera_depth_unit{"mm"}; \
+  std::string camera_realsense_serial{""}; \
+  int camera_realsense_stream_width{640}; \
+  int camera_realsense_stream_height{480}; \
+  int camera_realsense_fps{30}; \
   int camera_capture_device_index{0}; \
   int camera_capture_timeout_ms{500}; \
+  std::string pressure_serial_url{""}; \
+  int pressure_serial_baud{115200}; \
+  std::string pressure_serial_format{"auto"}; \
+  int pressure_serial_timeout_ms{50}; \
+  int pressure_serial_z_index{2}; \
+  int ultrasound_capture_device_index{1}; \
+  int ultrasound_capture_width{800}; \
+  int ultrasound_capture_height{600}; \
+  int ultrasound_capture_fps{30}; \
   std::string guidance_review_operator_id{"operator"}; \
   int rt_network_tolerance_percent{15}; \
   double joint_filter_hz{40.0}; \

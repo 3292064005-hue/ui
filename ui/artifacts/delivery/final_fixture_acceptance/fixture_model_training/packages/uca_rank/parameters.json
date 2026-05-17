@@ -1,0 +1,8 @@
+{
+  "preferred_index_ratio": 0.3125,
+  "agreement_smoothing": 0.35,
+  "score_weights": {
+    "mean_intensity": 0.6,
+    "peak_intensity": 0.4
+  }
+}

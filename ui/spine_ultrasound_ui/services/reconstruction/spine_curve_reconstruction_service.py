@@ -10,6 +10,7 @@ from spine_ultrasound_ui.services.reconstruction.frame_anatomy_point_inference_s
 from spine_ultrasound_ui.services.reconstruction.lamina_center_inference_service import LaminaCenterInferenceService
 from spine_ultrasound_ui.services.reconstruction.spine_curve_aggregation_service import SpineCurveAggregationService
 from spine_ultrasound_ui.services.reconstruction.vpi_projection_builder import VPIProjectionBuilder
+from spine_ultrasound_ui.training.runtime_adapters.common import ModelRuntimeLoadError
 from spine_ultrasound_ui.utils import now_text
 
 
@@ -62,9 +63,12 @@ class SpineCurveReconstructionService:
         if not session_id:
             raise ValueError('input_index.session_id is required')
         projection_bundle = self.vpi_builder.build(input_index)
-        bone_mask_bundle = self.bone_segmentation_service.infer(projection_bundle)
-        frame_anatomy_points = self.frame_anatomy_point_service.infer(input_index)
-        lamina_candidates = self.lamina_center_service.infer(projection_bundle, bone_mask_bundle, input_index, frame_anatomy_points=frame_anatomy_points)
+        try:
+            bone_mask_bundle = self.bone_segmentation_service.infer(projection_bundle)
+            frame_anatomy_points = self.frame_anatomy_point_service.infer(input_index)
+            lamina_candidates = self.lamina_center_service.infer(projection_bundle, bone_mask_bundle, input_index, frame_anatomy_points=frame_anatomy_points)
+        except ModelRuntimeLoadError as exc:
+            return self._blocked_reconstruction(input_index, projection_bundle, str(exc))
         aggregated = self.curve_aggregation_service.aggregate(lamina_candidates, dict(input_index.get('patient_registration', {})))
         spine_curve = dict(aggregated['spine_curve'])
         landmark_track = dict(aggregated['landmark_track'])
@@ -198,6 +202,71 @@ class SpineCurveReconstructionService:
         if point_count < self.min_selected_points and 'insufficient_reconstruction_points' in configured and 'insufficient_reconstruction_points' not in blockers:
             blockers.append('insufficient_reconstruction_points')
         return self._unique_reasons(blockers)
+
+    def _blocked_reconstruction(self, input_index: dict[str, Any], projection_bundle: dict[str, Any], reason: str) -> dict[str, Any]:
+        session_id = str(input_index.get('session_id', '') or '')
+        blocker = reason or 'model_runtime_blocked'
+        runtime_models = {
+            'bone_segmentation': {'runtime_kind': 'blocked', 'release_state': 'blocked', 'load_error': blocker},
+            'frame_anatomy_keypoint': {'runtime_kind': 'blocked', 'release_state': 'blocked', 'load_error': blocker},
+            'lamina_keypoint': {'runtime_kind': 'blocked', 'release_state': 'blocked', 'load_error': blocker},
+        }
+        summary = {
+            'generated_at': now_text(),
+            'session_id': session_id,
+            'experiment_id': str(input_index.get('experiment_id', '') or ''),
+            'method_version': self.method_version,
+            'runtime_profile': profile_name(self.profile),
+            'profile_release_state': str(self.profile.get('profile_release_state', 'research_validated') or 'research_validated'),
+            'closure_mode': str(self.profile.get('closure_mode', 'runtime_optional') or 'runtime_optional'),
+            'profile_config_path': str(self.profile.get('profile_config_path', '') or ''),
+            'profile_load_error': str(self.profile.get('profile_load_error', '') or ''),
+            'point_count': 0,
+            'segment_count': 0,
+            'confidence': 0.0,
+            'requires_manual_review': True,
+            'manual_review_reasons': [blocker],
+            'hard_blockers': [blocker],
+            'soft_review_reasons': [],
+            'closure_verdict': 'blocked',
+            'provenance_purity': 'blocked',
+            'source_contamination_flags': [],
+            'reconstruction_status': 'blocked',
+            'coordinate_frame': 'patient_surface',
+            'selected_row_count': int(input_index.get('source_counts', {}).get('selected_rows', 0) or 0),
+            'authoritative_row_count': int(input_index.get('source_counts', {}).get('authoritative_rows', 0) or 0),
+            'vpi_peak_intensity': float(projection_bundle.get('stats', {}).get('peak_intensity', 0.0) or 0.0),
+            'bone_coverage_ratio': 0.0,
+            'lamina_candidate_count': 0,
+            'frame_anatomy_point_count': 0,
+            'frame_anatomy_stable_frame_count': 0,
+            'lamina_candidate_source': 'model_runtime_blocked',
+            'runtime_models': runtime_models,
+            'input_gates': dict(input_index.get('gates', {})),
+        }
+        return {
+            'coronal_vpi': {
+                'generated_at': now_text(),
+                'session_id': session_id,
+                'method_version': projection_bundle.get('method_version', ''),
+                'stats': dict(projection_bundle.get('stats', {})),
+                'slices': list(projection_bundle.get('slices', [])),
+                'row_geometry': list(projection_bundle.get('row_geometry', [])),
+                'contributing_frames': list(projection_bundle.get('contributing_frames', [])),
+                'contribution_map': np.asarray(projection_bundle.get('contribution_map', np.zeros((1, 1), dtype=np.float32))),
+                'image': np.asarray(projection_bundle.get('image', np.zeros((1, 1), dtype=np.float32))),
+                'preview_rgb': np.asarray(projection_bundle.get('preview_rgb', np.zeros((1, 1, 3), dtype=np.uint8))),
+            },
+            'frame_anatomy_points': {'generated_at': now_text(), 'session_id': session_id, 'points': [], 'stable_pairs': [], 'summary': {'manual_review_reasons': [blocker], 'point_count': 0}, 'runtime_model': runtime_models['frame_anatomy_keypoint']},
+            'bone_mask': {'generated_at': now_text(), 'session_id': session_id, 'method_version': 'model_runtime_blocked', 'summary': {'coverage_ratio': 0.0}, 'runtime_model': runtime_models['bone_segmentation'], 'mask': np.zeros((1, 1), dtype=np.float32), 'binary_mask': np.zeros((1, 1), dtype=np.uint8)},
+            'lamina_candidates': {'generated_at': now_text(), 'session_id': session_id, 'candidates': [], 'summary': {'candidate_count': 0, 'primary_source': 'model_runtime_blocked'}, 'runtime_model': runtime_models['lamina_keypoint']},
+            'pose_series': {'generated_at': now_text(), 'session_id': session_id, 'coordinate_frame': 'patient_surface', 'poses': [dict(item) for item in input_index.get('probe_pose_series', []) if isinstance(item, dict)]},
+            'reconstruction_evidence': {'generated_at': now_text(), 'session_id': session_id, 'method_version': self.method_version, 'vpi_stats': dict(projection_bundle.get('stats', {})), 'bone_mask_summary': {'coverage_ratio': 0.0}, 'frame_anatomy_summary': {'point_count': 0}, 'lamina_summary': {'candidate_count': 0}, 'row_geometry': list(projection_bundle.get('row_geometry', [])), 'contributing_frames': list(projection_bundle.get('contributing_frames', [])), 'runtime_models': runtime_models, 'evidence_refs': [], 'hard_blockers': [blocker]},
+            'spine_curve': {'generated_at': now_text(), 'session_id': session_id, 'coordinate_frame': 'patient_surface', 'points': [], 'confidence': 0.0, 'fit': {}, 'summary': {'measurement_source': 'model_runtime_blocked'}},
+            'landmark_track': {'generated_at': now_text(), 'session_id': session_id, 'tracks': [], 'summary': {'track_count': 0}},
+            'reconstruction_summary': summary,
+            'prior_assisted_curve': {},
+        }
 
     @staticmethod
     def _unique_reasons(values: list[str]) -> list[str]:

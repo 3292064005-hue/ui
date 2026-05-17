@@ -1,0 +1,634 @@
+{
+  "ok": true,
+  "generated_at": "2026-05-17 17:05:52",
+  "output_root": "artifacts/delivery/final_fixture_acceptance",
+  "session_dir": "artifacts/delivery/final_fixture_acceptance/workspace/experiments/EXP_2026_0001/sessions/EXP_2026_0001_S001",
+  "session_report_path": "artifacts/delivery/final_fixture_acceptance/workspace/experiments/EXP_2026_0001/sessions/EXP_2026_0001_S001/export/session_report.json",
+  "delivery_traceability_matrix": "artifacts/delivery/final_fixture_acceptance/delivery_traceability_matrix.json",
+  "delivery_traceability_matrix_markdown": "artifacts/delivery/final_fixture_acceptance/delivery_traceability_matrix.md",
+  "guidance_fixture_dir": "artifacts/delivery/final_fixture_acceptance/fixtures/rgbd_guidance",
+  "manual_review_approval": {
+    "required": false,
+    "approved": true,
+    "operator_id": "fixture_acceptance",
+    "reason": "fixture_delivery_review"
+  },
+  "claim_boundary": {
+    "evidence_tier": "fixture_research",
+    "prototype_scope": "offline_research_prototype",
+    "non_clinical_statement": "Fixture/mock evidence only; no live/HIL or clinical readiness claim is made.",
+    "live_hil_closed": false,
+    "clinical_ready": false,
+    "clinical_claim": "none",
+    "authoritative_scope": "repository_fixture_replay"
+  },
+  "model_bundle_evidence": {
+    "frame_anatomy_keypoint": {
+      "config_path": "configs/models/frame_anatomy_keypoint_runtime.yaml",
+      "package_dir": "models/frame_anatomy_keypoint",
+      "package_name": "frame_anatomy_keypoint_exported",
+      "package_hash": "111ae98ee777748fee5981cd22f39267dc9c89d2b1a26527eb3b228704d4e57c",
+      "release_state": "research_validated",
+      "clinical_claim": "non_clinical_research_only",
+      "trainer_backend": "numpy_baseline",
+      "dataset_source": "fixture",
+      "dataset_hash": "committed_frame_anatomy_fixture_v1",
+      "strict_runtime_required": true
+    },
+    "lamina_seg": {
+      "config_path": "configs/models/lamina_seg_runtime.yaml",
+      "package_dir": "models/lamina_seg",
+      "package_name": "lamina_seg_baseline",
+      "package_hash": "2f85baadc8fde752ed41152ca0edbb30b6bdced98033ef248e7c6a58cf93aa73",
+      "release_state": "research_baseline",
+      "clinical_claim": "non_clinical",
+      "trainer_backend": "numpy_baseline",
+      "dataset_source": "fixture",
+      "dataset_hash": "committed_lamina_seg_fixture_v1",
+      "strict_runtime_required": true
+    },
+    "lamina_keypoint": {
+      "config_path": "configs/models/lamina_keypoint_runtime.yaml",
+      "package_dir": "models/lamina_keypoint",
+      "package_name": "lamina_keypoint_baseline",
+      "package_hash": "217a19aa4d5b22110d5a15f7fb3f2fb732b2540a3f1c8002319e58ed7d8668e5",
+      "release_state": "research_baseline",
+      "clinical_claim": "non_clinical",
+      "trainer_backend": "numpy_baseline",
+      "dataset_source": "fixture",
+      "dataset_hash": "committed_lamina_keypoint_fixture_v1",
+      "strict_runtime_required": true
+    },
+    "uca_rank": {
+      "config_path": "configs/models/uca_rank_runtime.yaml",
+      "package_dir": "models/uca_rank",
+      "package_name": "uca_rank_baseline",
+      "package_hash": "b3fd99d80bf3967dfb7a30c623507d7f58a2a789358b1d638532f2137a30a48c",
+      "release_state": "research_baseline",
+      "clinical_claim": "non_clinical",
+      "trainer_backend": "numpy_baseline",
+      "dataset_source": "fixture",
+      "dataset_hash": "committed_uca_rank_fixture_v1",
+      "strict_runtime_required": true
+    }
+  },
+  "fixture_training": {
+    "command": "/home/chen/miniconda3/envs/spine-ultrasound/bin/python /media/chen/New/plform/project/ui/ui/scripts/run_model_training_pipeline.py --task all --backend numpy_baseline --output-root artifacts/delivery/final_fixture_acceptance/fixture_model_training",
+    "returncode": 0,
+    "stdout_tail": [
+      "{\"summary_path\": \"artifacts/delivery/final_fixture_acceptance/fixture_model_training/model_training_pipeline_numpy_baseline_all.json\", \"ok\": true}"
+    ],
+    "stderr_tail": [],
+    "json_result": {
+      "summary_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/model_training_pipeline_numpy_baseline_all.json",
+      "ok": true
+    },
+    "training_summary": {
+      "generated_at": "2026-05-17 17:05:35",
+      "backend": "numpy_baseline",
+      "task": "all",
+      "output_root": "artifacts/delivery/final_fixture_acceptance/fixture_model_training",
+      "results": [
+        {
+          "task": "frame_anatomy_keypoint",
+          "ok": true,
+          "mode": "exported_package",
+          "package_dir": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/frame_anatomy_keypoint",
+          "runtime_model_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/frame_anatomy_keypoint/frame_anatomy_keypoint_weights.npz",
+          "benchmark_manifest_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/frame_anatomy_keypoint/benchmark_manifest.json"
+        },
+        {
+          "task": "lamina_seg",
+          "ok": true,
+          "mode": "exported_package",
+          "package_dir": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/lamina_seg",
+          "parameter_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/lamina_seg/parameters.json",
+          "model_meta_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/lamina_seg/model_meta.json",
+          "runtime_model_path": "",
+          "bundle_manifest_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/lamina_seg/bundle_manifest.json"
+        },
+        {
+          "task": "lamina_keypoint",
+          "ok": true,
+          "mode": "exported_package",
+          "package_dir": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/lamina_keypoint",
+          "parameter_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/lamina_keypoint/parameters.json",
+          "model_meta_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/lamina_keypoint/model_meta.json",
+          "runtime_model_path": "",
+          "bundle_manifest_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/lamina_keypoint/bundle_manifest.json"
+        },
+        {
+          "task": "uca_rank",
+          "ok": true,
+          "mode": "exported_package",
+          "package_dir": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/uca_rank",
+          "parameter_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/uca_rank/parameters.json",
+          "model_meta_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/uca_rank/model_meta.json",
+          "runtime_model_path": "",
+          "bundle_manifest_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/packages/uca_rank/bundle_manifest.json"
+        }
+      ]
+    },
+    "summary_path": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/model_training_pipeline_numpy_baseline_all.json"
+  },
+  "required_artifacts": {
+    "session_report": {
+      "relative_path": "export/session_report.json",
+      "present": true
+    },
+    "cobb_measurement": {
+      "relative_path": "derived/assessment/cobb_measurement.json",
+      "present": true
+    },
+    "assessment_summary": {
+      "relative_path": "derived/assessment/assessment_summary.json",
+      "present": true
+    },
+    "reconstruction_summary": {
+      "relative_path": "derived/reconstruction/reconstruction_summary.json",
+      "present": true
+    },
+    "frame_sync_index": {
+      "relative_path": "derived/sync/frame_sync_index.json",
+      "present": true
+    },
+    "reconstruction_input_index": {
+      "relative_path": "derived/reconstruction/reconstruction_input_index.json",
+      "present": true
+    },
+    "model_reconstruction_evidence": {
+      "relative_path": "derived/reconstruction/reconstruction_evidence.json",
+      "present": true
+    },
+    "coronal_vpi": {
+      "relative_path": "derived/reconstruction/coronal_vpi.npz",
+      "present": true
+    },
+    "vpi_preview": {
+      "relative_path": "derived/reconstruction/vpi_preview.png",
+      "present": true
+    },
+    "source_frame_set": {
+      "relative_path": "derived/sync/source_frame_set.json",
+      "present": true
+    },
+    "calibration_bundle": {
+      "relative_path": "meta/calibration_bundle.json",
+      "present": true
+    },
+    "scan_protocol": {
+      "relative_path": "derived/preview/scan_protocol.json",
+      "present": true
+    }
+  },
+  "traceability": [
+    {
+      "name": "d435i_rgbd_guidance",
+      "project_book_claim": "D435i back ROI, midline, surface normal and scan corridor",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "derived/sync/source_frame_set.json",
+        "derived/guidance/body_surface.json",
+        "derived/guidance/guidance_targets.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "calibration_freeze",
+      "project_book_claim": "Robot base, camera, probe TCP and ultrasound image-frame calibration bundle",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "meta/calibration_bundle.json",
+        "meta/localization_freeze.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "path_planning",
+      "project_book_claim": "Standardized scan path with smoothing, overlap, speed and normal constraints",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "meta/scan_plan.json",
+        "derived/preview/scan_protocol.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "pressure_feedback",
+      "project_book_claim": "Pressure/contact timeline for force-position mixed control evidence",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "derived/pressure/pressure_sensor_timeline.json",
+        "export/pressure_analysis.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "continuous_ultrasound_capture",
+      "project_book_claim": "Continuous ultrasound frames and frame quality evidence",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "raw/ultrasound/index.jsonl",
+        "derived/ultrasound/ultrasound_frame_metrics.json",
+        "export/ultrasound_analysis.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "multimodal_sync",
+      "project_book_claim": "Ultrasound, camera, pressure and robot pose synchronized rows",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "derived/sync/frame_sync_index.json",
+        "derived/reconstruction/reconstruction_input_index.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "anatomy_models",
+      "project_book_claim": "Bone mask, frame anatomy keypoints and lamina candidates from strict runtime model packages",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "derived/reconstruction/bone_mask.npz",
+        "derived/reconstruction/frame_anatomy_points.json",
+        "derived/reconstruction/lamina_candidates.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "vpi_reconstruction",
+      "project_book_claim": "VPI volume, preview and reconstruction summary",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "derived/reconstruction/coronal_vpi.npz",
+        "derived/reconstruction/vpi_preview.png",
+        "derived/reconstruction/reconstruction_summary.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "cobb_assessment",
+      "project_book_claim": "Offline Cobb/UCA assessment and manual-review reasons",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "derived/assessment/cobb_measurement.json",
+        "derived/assessment/uca_measurement.json",
+        "derived/assessment/assessment_summary.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "ui_report_export",
+      "project_book_claim": "Operator-facing summary and exportable session report",
+      "status": "delivered_fixture",
+      "evidence_tier": "fixture_research",
+      "artifacts": [
+        "export/summary.txt",
+        "export/session_report.json"
+      ],
+      "artifacts_present": true
+    },
+    {
+      "name": "live_hil_boundary",
+      "project_book_claim": "Real hardware/HIL and clinical consistency evidence",
+      "status": "open_live_hil_gap",
+      "evidence_tier": "not_claimed",
+      "artifacts": [
+        "docs/05_verification/CURRENT_KNOWN_GAPS.md"
+      ],
+      "artifacts_present": true
+    }
+  ],
+  "hard_blockers": [],
+  "logs_tail": [
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_safety_recovery_contract: get_safety_recovery_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_release_contract: get_release_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_deployment_contract: get_deployment_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_fault_injection_contract: get_fault_injection_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] set_auto_mode: set_auto_mode accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] query_controller_log: query_controller_log accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] query_rl_projects: query_rl_projects accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] query_path_lists: query_path_lists accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_io_snapshot: get_io_snapshot accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_safety_config: get_safety_config accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_motion_contract: get_motion_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_register_snapshot: get_register_snapshot accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_runtime_alignment: get_runtime_alignment accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_xmate_model_summary: get_xmate_model_summary accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_sdk_runtime_config: get_sdk_runtime_config accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_identity_contract: get_identity_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_robot_family_contract: get_robot_family_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_vendor_boundary_contract: get_vendor_boundary_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_clinical_mainline_contract: get_clinical_mainline_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_capability_contract: get_capability_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_model_authority_contract: get_model_authority_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_session_freeze: get_session_freeze accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_session_drift_contract: get_session_drift_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_hardware_lifecycle_contract: get_hardware_lifecycle_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_rt_kernel_contract: get_rt_kernel_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_control_governance_contract: get_control_governance_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_controller_evidence: get_controller_evidence accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_dual_state_machine_contract: get_dual_state_machine_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_mainline_executor_contract: get_mainline_executor_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_recovery_contract: get_recovery_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_safety_recovery_contract: get_safety_recovery_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_release_contract: get_release_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_deployment_contract: get_deployment_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_fault_injection_contract: get_fault_injection_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[2026-05-17 17:05:36] 实验 EXP_2026_0001 已创建。当前流程停留在预览阶段，session 尚未锁定。"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] validate_setup: setup validated"
+    },
+    {
+      "level": "INFO",
+      "message": "[2026-05-17 17:05:36] [IMPLEMENTED] 视觉定位完成：实验 EXP_2026_0001 使用 camera 主引导与 ultrasound 校验联合生成 guidance 合同。"
+    },
+    {
+      "level": "INFO",
+      "message": "[2026-05-17 17:05:36] 视觉引导复核已批准：Guidance review approved by fixture_acceptance; session freeze is now permitted."
+    },
+    {
+      "level": "INFO",
+      "message": "[2026-05-17 17:05:36] [IMPLEMENTED] 扫查路径预览已生成：当前扫查路径由患者配准、表面建模、接触预探、执行候选评估与长轴条带扫查策略联合生成。 预览文件 artifacts/delivery/final_fixture_acceptance/workspace/experiments/EXP_2026_0001/derived/preview/scan_plan_preview.json；segments=1 waypoints=721 duration_ms=44702；execution_profile=standard；model=模型前检通过"
+    },
+    {
+      "level": "INFO",
+      "message": "[2026-05-17 17:05:37] 会话 EXP_2026_0001_S001 已锁定，manifest 不再允许改写语义字段。"
+    },
+    {
+      "level": "INFO",
+      "message": "[2026-05-17 17:05:39] start_procedure(scan) 已交由 runtime execution graph 接管，系统进入自动扫查流程。"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] lock_session: lock_session accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] load_scan_plan: load_scan_plan accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] start_procedure: start_procedure accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[2026-05-17 17:05:41] 安全退让已请求。"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] safe_retreat: safe_retreat accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] query_controller_log: query_controller_log accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] query_rl_projects: query_rl_projects accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] query_path_lists: query_path_lists accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_io_snapshot: get_io_snapshot accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_safety_config: get_safety_config accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_motion_contract: get_motion_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_register_snapshot: get_register_snapshot accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_runtime_alignment: get_runtime_alignment accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_xmate_model_summary: get_xmate_model_summary accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_sdk_runtime_config: get_sdk_runtime_config accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_identity_contract: get_identity_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_robot_family_contract: get_robot_family_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_vendor_boundary_contract: get_vendor_boundary_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_clinical_mainline_contract: get_clinical_mainline_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_capability_contract: get_capability_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_model_authority_contract: get_model_authority_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_session_freeze: get_session_freeze accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_session_drift_contract: get_session_drift_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_hardware_lifecycle_contract: get_hardware_lifecycle_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_rt_kernel_contract: get_rt_kernel_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_control_governance_contract: get_control_governance_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_controller_evidence: get_controller_evidence accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_dual_state_machine_contract: get_dual_state_machine_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_mainline_executor_contract: get_mainline_executor_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_recovery_contract: get_recovery_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_safety_recovery_contract: get_safety_recovery_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_release_contract: get_release_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_deployment_contract: get_deployment_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[mock_core] get_fault_injection_contract: get_fault_injection_contract accepted"
+    },
+    {
+      "level": "INFO",
+      "message": "[2026-05-17 17:05:44] 会话摘要已保存到 artifacts/delivery/final_fixture_acceptance/workspace/experiments/EXP_2026_0001/sessions/EXP_2026_0001_S001/export/summary.json"
+    },
+    {
+      "level": "INFO",
+      "message": "[2026-05-17 17:05:47] 文本摘要已导出到 artifacts/delivery/final_fixture_acceptance/workspace/experiments/EXP_2026_0001/sessions/EXP_2026_0001_S001/export/summary.txt"
+    },
+    {
+      "level": "INFO",
+      "message": "[2026-05-17 17:05:48] [IMPLEMENTED] 质量时间线与告警时间线已生成：quality_timeline.json / alarm_timeline.json"
+    },
+    {
+      "level": "INFO",
+      "message": "[2026-05-17 17:05:49] [IMPLEMENTED] 重建输入索引、VPI、lamina candidates、脊柱曲线、landmark track 与回放/同步索引已生成：spine_curve.json"
+    },
+    {
+      "level": "INFO",
+      "message": "[2026-05-17 17:05:53] [IMPLEMENTED] 正式 lamina-center Cobb / UCA 辅助评估、assessment summary、会话报告、对比分析、趋势分析、诊断包与 QA 包已生成：session_report.json"
+    }
+  ]
+}

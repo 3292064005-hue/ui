@@ -1,0 +1,39 @@
+{
+  "bundle_id": "lamina_keypoint:lamina_keypoint",
+  "bundle_version": "v1",
+  "package_name": "lamina_keypoint",
+  "runtime_profile": "clinical_mainline",
+  "training_run_id": "lamina_keypoint:81f08012349f72e8",
+  "dataset_source": "fixture",
+  "dataset_hash": "37d7785248279a475fcd43178c5df9ca03d225ad8e1bbc35ee80e393b1e3dce0",
+  "trainer_backend": "numpy_baseline",
+  "release_state": "research_fixture",
+  "clinical_claim": "non_clinical_research_only",
+  "benchmark_manifest_path": "",
+  "strict_runtime_required": true,
+  "artifacts": {
+    "weights_path": "parameters.json",
+    "entrypoint": "spine_ultrasound_ui.training.runtime_adapters.lamina_keypoint",
+    "parameter_path": "parameters.json",
+    "meta_path": "model_meta.json"
+  },
+  "compatibility": {
+    "robot_models": [
+      "xmate3",
+      "xmate7",
+      "xmateer3pro",
+      "xmateer7pro"
+    ],
+    "runtime_modes": [
+      "core",
+      "headless_review"
+    ]
+  },
+  "preprocess": {},
+  "postprocess": {},
+  "metrics": {
+    "sample_count": 1,
+    "pair_count": 1,
+    "avg_visibility_score": 1.0
+  }
+}

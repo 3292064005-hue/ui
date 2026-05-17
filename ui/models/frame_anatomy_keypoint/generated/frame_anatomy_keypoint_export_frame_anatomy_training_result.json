@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-04-04 09:29:58",
+  "generated_at": "2026-05-17 17:05:35",
   "task_name": "frame_anatomy_keypoint_export",
   "trainer_backend": "numpy_baseline",
   "learned_parameters": {
@@ -38,6 +38,11 @@
     },
     "backend_options": {}
   },
+  "training_run_id": "frame_anatomy_keypoint:bf31741a3f61f1bc",
+  "dataset_source": "fixture",
+  "dataset_hash": "bf31741a3f61f1bcff4e1a0dc90475665e243b71d0f5b52b0f2a53cfc1a5ee18",
+  "release_state": "research_fixture",
+  "clinical_claim": "non_clinical_research_only",
   "export_weights": {
     "left_template": [
       [

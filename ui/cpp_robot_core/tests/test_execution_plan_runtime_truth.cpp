@@ -69,14 +69,20 @@ std::string lockSessionJson() {
     "session_id": "sess-truth",
     "session_dir": "/tmp/spine_truth_session",
     "config_snapshot": {"home_joint_rad": [0.0, 0.3, 0.6, 0.0, 1.2, 0.0, 0.0]},
-    "device_roster": {},
+    "device_roster": {
+      "robot": {"provider": "contract_shell", "connected": true, "authoritative": false},
+      "camera": {"provider": "rgbd_fixture", "connected": true, "authoritative": false},
+      "ultrasound": {"provider": "frame_fixture", "connected": true, "authoritative": false},
+      "pressure": {"provider": "mock_force_sensor", "connected": true, "authoritative": false}
+    },
     "software_version": "test",
     "build_id": "test",
     "scan_plan_hash": "hash-truth-001",
     "force_sensor_provider": "mock",
     "protocol_version": 1,
-    "safety_thresholds": {},
-    "device_health_snapshot": {}
+    "safety_thresholds": {"desired_contact_force_n": 8.0, "max_z_force_n": 12.0},
+    "device_health_snapshot": {"robot": {"connected": true, "source": "contract_shell"}},
+    "session_freeze_policy": {"recheck_on_start_procedure": false}
   })JSON";
 }
 

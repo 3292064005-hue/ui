@@ -1,0 +1,5 @@
+{
+  "avg_lamina_separation_mm": 80.0,
+  "min_confidence": 1.0,
+  "candidate_window_px": 12
+}

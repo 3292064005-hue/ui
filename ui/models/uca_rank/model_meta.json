@@ -6,5 +6,10 @@
   "task": "vpi_slice_ranking",
   "release_state": "research_baseline",
   "clinical_claim": "non_clinical",
-  "input_contract": "vpi_slice_metadata"
+  "input_contract": "vpi_slice_metadata",
+  "trainer_backend": "numpy_baseline",
+  "training_run_id": "uca_rank:committed_fixture_v1",
+  "dataset_source": "fixture",
+  "dataset_hash": "committed_uca_rank_fixture_v1",
+  "strict_runtime_required": true
 }

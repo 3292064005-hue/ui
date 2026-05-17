@@ -1,2 +1,3 @@
 package_dir: ../../models/lamina_keypoint
 backend: baseline
+strict_runtime_required: true

@@ -1,0 +1,34 @@
+{
+  "generated_at": "2026-05-17 17:05:35",
+  "task_name": "uca_auxiliary",
+  "trainer_backend": "numpy_baseline",
+  "learned_parameters": {
+    "preferred_index_ratio": 0.3125,
+    "agreement_smoothing": 0.35,
+    "score_weights": {
+      "mean_intensity": 0.6,
+      "peak_intensity": 0.4
+    }
+  },
+  "metrics": {
+    "sample_count": 1,
+    "avg_best_slice_index": 5.0,
+    "avg_uca_angle_deg": 18.2
+  },
+  "spec": {
+    "dataset_root": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/fixtures/uca",
+    "split_file": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/fixtures/uca/splits/split_v1.json",
+    "output_dir": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/requests/uca",
+    "task_name": "uca_auxiliary",
+    "ranking_model": "numpy_baseline_rank",
+    "segmentation_backbone": "numpy_baseline_seg",
+    "batch_size": 8,
+    "max_epochs": 10,
+    "learning_rate": 0.001,
+    "num_workers": 0,
+    "export_onnx": false,
+    "split_name": "train",
+    "trainer_backend": "numpy_baseline",
+    "backend_options": {}
+  }
+}

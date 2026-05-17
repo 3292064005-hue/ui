@@ -1,0 +1,3 @@
+package_dir: ../packages/uca_rank
+backend: numpy_baseline
+strict_runtime_required: true

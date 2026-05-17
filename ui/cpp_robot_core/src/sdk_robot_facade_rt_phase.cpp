@@ -109,66 +109,6 @@ private:
   SdkRobotFacade& owner_;
 };
 
-bool SdkRobotFacade::populateObservedState(RtObservedState& out, std::string* reason) {
-  out = {};
-  out.tcp_pose = postureVectorToMatrix(tcp_pose_);
-  for (std::size_t idx = 0; idx < std::min<std::size_t>(6, joint_pos_.size()); ++idx) out.joint_pos[idx] = joint_pos_[idx];
-  for (std::size_t idx = 0; idx < std::min<std::size_t>(6, joint_vel_.size()); ++idx) out.joint_vel[idx] = joint_vel_[idx];
-  for (std::size_t idx = 0; idx < std::min<std::size_t>(6, joint_torque_.size()); ++idx) out.joint_torque[idx] = joint_torque_[idx];
-  const double now_s = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-  out.monotonic_time_s = now_s;
-#ifdef ROBOT_CORE_WITH_XCORE_SDK
-  if (live_binding_established_ && robot_ != nullptr) {
-    try {
-      std::array<double, 16> tcp_pose{};
-      std::array<double, 6> joint_pos{};
-      std::array<double, 6> joint_vel{};
-      std::array<double, 6> joint_tau{};
-      std::array<double, 6> ext_tau{};
-      const bool got_pose = (robot_->getStateData(rokae::RtSupportedFields::tcpPose_m, tcp_pose) == 0);
-      const bool got_joints = (robot_->getStateData(rokae::RtSupportedFields::jointPos_m, joint_pos) == 0);
-      const bool got_joint_vel = (robot_->getStateData(rokae::RtSupportedFields::jointVel_m, joint_vel) == 0);
-      const bool got_tau = (robot_->getStateData(rokae::RtSupportedFields::tau_m, joint_tau) == 0);
-      const bool got_ext = (robot_->getStateData(rokae::RtSupportedFields::tauExt_inBase, ext_tau) == 0);
-      if (got_pose) out.tcp_pose = tcp_pose;
-      if (got_joints) out.joint_pos = joint_pos;
-      if (got_joint_vel) out.joint_vel = joint_vel;
-      if (got_tau) out.joint_torque = joint_tau;
-      if (got_ext) out.external_wrench = ext_tau;
-      out.valid = got_pose && got_joints;
-      if (out.valid) {
-        last_rt_state_sample_time_s_ = now_s;
-        const std::size_t axis = std::min<std::size_t>(11, rt_phase_loop_state_.contact_axis_index);
-        if (last_rt_observed_pose_initialized_ && now_s > last_rt_observed_time_s_) {
-          const double dt = now_s - last_rt_observed_time_s_;
-          out.normal_axis_velocity_m_s = (out.tcp_pose[axis] - last_rt_observed_pose_[axis]) / std::max(1e-6, dt);
-        }
-        last_rt_observed_pose_ = out.tcp_pose;
-        last_rt_observed_pose_initialized_ = true;
-        last_rt_observed_time_s_ = now_s;
-      }
-    } catch (const std::exception& ex) {
-      if (reason != nullptr) *reason = ex.what();
-      out.valid = false;
-    }
-    out.age_ms = last_rt_state_sample_time_s_ > 0.0 ? (now_s - last_rt_state_sample_time_s_) * 1000.0 : rt_phase_contract_.common.stale_state_timeout_ms + 1.0;
-    out.pressure_force_n = ai_.count("board0_port0") ? ai_.at("board0_port0") : 0.0;
-    out.pressure_age_ms = out.age_ms;
-    out.pressure_valid = ai_.count("board0_port0") > 0;
-    out.stale = out.age_ms > rt_phase_contract_.common.stale_state_timeout_ms;
-    return out.valid;
-  }
-#endif
-  out.valid = connected_;
-  out.age_ms = 0.0;
-  out.normal_axis_velocity_m_s = 0.0;
-  out.pressure_force_n = ai_.count("board0_port0") ? ai_.at("board0_port0") : 0.0;
-  out.pressure_age_ms = 0.0;
-  out.pressure_valid = ai_.count("board0_port0") > 0;
-  out.stale = false;
-  return out.valid;
-}
-
 RtPhaseStepResult SdkRobotFacade::stepSeekContact(const RtObservedState& state) {
   RtPhaseStepResult result{};
   result.telemetry.phase_name = "seek_contact";

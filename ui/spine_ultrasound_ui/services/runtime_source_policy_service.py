@@ -8,8 +8,8 @@ from spine_ultrasound_ui.models import RuntimeConfig
 from spine_ultrasound_ui.services.deployment_profile_service import DeploymentProfileService
 
 
-_FORCE_LIVE_PROVIDERS = {"rokae_force_sensor", "xcore_force_sensor", "live_force_sensor", "hardware_force_sensor"}
-_CAMERA_LIVE_MODES = {"live", "opencv_camera", "webcam"}
+_FORCE_LIVE_PROVIDERS = {"rokae_force_sensor", "xcore_force_sensor", "live_force_sensor", "hardware_force_sensor", "serial_force_sensor"}
+_CAMERA_LIVE_MODES = {"live", "opencv_camera", "webcam", "realsense", "realsense_d435i", "d435i"}
 _CAMERA_REPLAY_MODES = {"filesystem", "replay"}
 _CAMERA_SIM_MODES = {"synthetic"}
 
@@ -61,10 +61,10 @@ class RuntimeSourcePolicyService:
             return "unknown"
         if normalized in {"mock", "mock_force_sensor", "simulated_force_sensor"}:
             return "simulated"
-        if normalized in _FORCE_LIVE_PROVIDERS or "rokae" in normalized or "xcore" in normalized:
-            return "live"
-        if "replay" in normalized or "recorded" in normalized:
+        if "replay" in normalized or "recorded" in normalized or normalized.startswith("serial_force_sensor:file:"):
             return "replay"
+        if normalized in _FORCE_LIVE_PROVIDERS or normalized.startswith("serial_force_sensor") or "rokae" in normalized or "xcore" in normalized:
+            return "live"
         return "unknown"
 
     @staticmethod
@@ -81,7 +81,7 @@ class RuntimeSourcePolicyService:
     @staticmethod
     def guidance_source_tier(source_type: str) -> str:
         normalized = str(source_type or "").strip().lower()
-        if normalized in {"camera_only", "hybrid", "camera_backed", "live_camera"}:
+        if normalized in {"camera_only", "hybrid", "camera_backed", "live_camera", "camera_ultrasound_fusion", "ultrasound_augmented_guidance"}:
             return "live"
         if normalized in {"filesystem", "replay", "recorded"}:
             return "replay"

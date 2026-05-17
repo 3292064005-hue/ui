@@ -1,0 +1,47 @@
+{
+  "generated_at": "2026-05-17 17:05:35",
+  "model_name": "lamina_seg",
+  "package_name": "lamina_seg_fixture",
+  "runtime_kind": "deterministic_baseline",
+  "release_state": "research_fixture",
+  "clinical_claim": "non_clinical_research_only",
+  "training_run_id": "lamina_seg:03267a14afc86481",
+  "dataset_source": "fixture",
+  "dataset_hash": "37d7785248279a475fcd43178c5df9ca03d225ad8e1bbc35ee80e393b1e3dce0",
+  "strict_runtime_required": true,
+  "task_name": "lamina_center",
+  "trainer_backend": "numpy_baseline",
+  "training_spec": {
+    "dataset_root": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/fixtures/lamina_center",
+    "split_file": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/fixtures/lamina_center/splits/split_v1.json",
+    "output_dir": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/requests/lamina_center",
+    "task_name": "lamina_center",
+    "input_mode": "vpi_2d",
+    "segmentation_backbone": "numpy_baseline_seg",
+    "keypoint_head": "numpy_baseline_heatmap",
+    "batch_size": 4,
+    "max_epochs": 12,
+    "learning_rate": 0.001,
+    "num_workers": 0,
+    "mixed_precision": false,
+    "export_onnx": false,
+    "split_name": "train",
+    "trainer_backend": "numpy_baseline",
+    "backend_options": {}
+  },
+  "runtime_model_path": "",
+  "parameter_path": "parameters.json",
+  "metrics": {
+    "sample_count": 1,
+    "positive_score_mean": 0.18254,
+    "negative_score_mean": 0.5,
+    "median_shape": [
+      8,
+      8
+    ]
+  },
+  "training_request_path": "",
+  "dependency_status": {},
+  "launch_plan": {},
+  "benchmark_manifest_path": ""
+}

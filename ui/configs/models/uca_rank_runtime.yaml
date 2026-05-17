@@ -1,2 +1,3 @@
 package_dir: ../../models/uca_rank
 backend: baseline
+strict_runtime_required: true

@@ -68,3 +68,23 @@ def test_execution_plan_requires_canonical_localization():
         assert 'canonical localization' in str(exc)
     else:
         raise AssertionError('execution plan should require canonical localization and reject synthetic fallback')
+
+
+def test_preview_plan_uses_rgbd_surface_orientation_from_localization():
+    service = PlanService()
+    experiment = ExperimentRecord(
+        exp_id="EXP_2026_RGBD",
+        created_at="2026-03-26 10:00:00",
+        state="AUTO_READY",
+        cobb_angle=0.0,
+        pressure_target=1.5,
+        save_dir="/tmp/demo",
+    )
+    localization = service.run_localization(experiment, RuntimeConfig(), device_roster=_device_roster())
+    assert localization.patient_registration["body_surface"]["depth_source"] == "depth_frame"
+    plan, _ = service.build_preview_plan(experiment, localization, RuntimeConfig())
+    first = plan.segments[0].waypoints[0]
+    planner_context = plan.validation_summary["planner_context"]
+    assert first.rx != 180.0
+    assert planner_context["surface_normal"][2] < 0.0
+    assert "rgbd_surface_pitch_deg" in planner_context

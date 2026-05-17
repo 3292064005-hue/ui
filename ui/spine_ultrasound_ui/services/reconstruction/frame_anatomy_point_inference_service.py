@@ -8,6 +8,7 @@ import numpy as np
 from PIL import Image
 
 from spine_ultrasound_ui.services.reconstruction.closure_profile import is_preweight_profile, load_reconstruction_profile, profile_name
+from spine_ultrasound_ui.training.runtime_adapters.common import ModelRuntimeLoadError, strict_model_runtime_required_for_target
 from spine_ultrasound_ui.training.runtime_adapters.keypoint_runtime_adapter import KeypointRuntimeAdapter
 from spine_ultrasound_ui.utils import now_text
 
@@ -41,6 +42,7 @@ class FrameAnatomyPointInferenceService:
             Path(__file__).resolve().parents[3] / 'configs' / 'models' / 'frame_anatomy_keypoint_runtime.yaml',
         )
         self.runtime_load_error = ''
+        self.strict_runtime_required = strict_model_runtime_required_for_target(self.runtime_model_config)
         self._try_load_runtime_adapter()
 
     def infer(self, input_index: dict[str, Any]) -> dict[str, Any]:
@@ -67,6 +69,8 @@ class FrameAnatomyPointInferenceService:
             raise ValueError('confidence and stability thresholds must be non-negative')
         rows = [dict(item) for item in input_index.get('selected_rows', input_index.get('rows', [])) if isinstance(item, dict)]
         session_id = str(input_index.get('session_id', '') or '')
+        if self.strict_runtime_required and (self.runtime_adapter is None or not self.runtime_adapter.is_loaded):
+            raise ModelRuntimeLoadError(f'model_runtime_blocked:frame_anatomy_keypoint:{self.runtime_load_error or "runtime_adapter_not_loaded"}')
         if not rows:
             return {
                 'generated_at': now_text(),
@@ -121,9 +125,13 @@ class FrameAnatomyPointInferenceService:
                     )
                     runtime_model = dict(result.get('runtime_model', runtime_model))
                 except Exception as exc:  # pragma: no cover - runtime failure path
+                    if self.strict_runtime_required:
+                        raise ModelRuntimeLoadError(f'model_runtime_blocked:frame_anatomy_keypoint:inference_failed:{type(exc).__name__}') from exc
                     manual_review_reasons.append(f'frame_model_inference_failed:{type(exc).__name__}')
-            if result is None:
+            if result is None and not self.strict_runtime_required:
                 result = self._fallback_infer(image, previous_pair)
+            if result is None:
+                raise ModelRuntimeLoadError('model_runtime_blocked:frame_anatomy_keypoint:no_inference_result')
             pair = self._normalize_pair(row, frame_id, image.shape, result, manual_review_reasons)
             if pair['detected']:
                 detected_frames += 1
@@ -288,6 +296,7 @@ class FrameAnatomyPointInferenceService:
         if self.runtime_adapter is None and self.runtime_model_config:
             self.runtime_adapter = KeypointRuntimeAdapter()
         if self.runtime_adapter is None or not self.runtime_model_config:
+            self.runtime_load_error = 'no_runtime_model_config'
             return
         config_path = Path(str(self.runtime_model_config))
         if not config_path.exists():

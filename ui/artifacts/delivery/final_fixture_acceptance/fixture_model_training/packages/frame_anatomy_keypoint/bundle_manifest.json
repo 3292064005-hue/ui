@@ -1,0 +1,39 @@
+{
+  "bundle_id": "frame_anatomy_keypoint:frame_anatomy_keypoint",
+  "bundle_version": "v1",
+  "package_name": "frame_anatomy_keypoint",
+  "runtime_profile": "clinical_mainline",
+  "training_run_id": "frame_anatomy_keypoint:bf31741a3f61f1bc",
+  "dataset_source": "fixture",
+  "dataset_hash": "bf31741a3f61f1bcff4e1a0dc90475665e243b71d0f5b52b0f2a53cfc1a5ee18",
+  "trainer_backend": "numpy_baseline",
+  "release_state": "research_fixture",
+  "clinical_claim": "non_clinical_research_only",
+  "benchmark_manifest_path": "benchmark_manifest.json",
+  "strict_runtime_required": true,
+  "artifacts": {
+    "weights_path": "frame_anatomy_keypoint_weights.npz",
+    "entrypoint": "spine_ultrasound_ui.training.runtime_adapters.frame_anatomy_keypoint",
+    "parameter_path": "parameters.json",
+    "meta_path": "model_meta.json"
+  },
+  "compatibility": {
+    "robot_models": [
+      "xmate3",
+      "xmate7",
+      "xmateer3pro",
+      "xmateer7pro"
+    ],
+    "runtime_modes": [
+      "core",
+      "headless_review"
+    ]
+  },
+  "preprocess": {},
+  "postprocess": {},
+  "metrics": {
+    "sample_count": 6,
+    "avg_pair_separation_px": 25.0,
+    "avg_confidence": 1.0
+  }
+}

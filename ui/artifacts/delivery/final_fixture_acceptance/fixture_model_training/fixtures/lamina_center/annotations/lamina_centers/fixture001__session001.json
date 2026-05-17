@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "case_id": "fixture001/session001",
+  "patient_id": "fixture001",
+  "session_id": "session001",
+  "coordinate_frame": "coronal_vpi_mm",
+  "points": [
+    {
+      "point_id": "p1",
+      "vertebra_instance_id": "v1",
+      "side": "left",
+      "x_mm": -40.0,
+      "y_mm": 20.0,
+      "z_mm": 0.0,
+      "visibility": "clear"
+    },
+    {
+      "point_id": "p2",
+      "vertebra_instance_id": "v1",
+      "side": "right",
+      "x_mm": 40.0,
+      "y_mm": 20.0,
+      "z_mm": 0.0,
+      "visibility": "clear"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "threshold_value": 0.34127,
+  "post_blur_kernel": 0,
+  "normalization_mode": "per_image_minmax"
+}

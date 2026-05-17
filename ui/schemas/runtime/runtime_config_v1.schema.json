@@ -318,6 +318,34 @@
       "type": "integer",
       "default": 3
     },
+    "camera_device_id": {
+      "type": "string",
+      "default": "rgbd_back_camera"
+    },
+    "camera_depth_enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "camera_depth_unit": {
+      "type": "string",
+      "default": "mm"
+    },
+    "camera_realsense_serial": {
+      "type": "string",
+      "default": ""
+    },
+    "camera_realsense_stream_width": {
+      "type": "integer",
+      "default": 640
+    },
+    "camera_realsense_stream_height": {
+      "type": "integer",
+      "default": 480
+    },
+    "camera_realsense_fps": {
+      "type": "integer",
+      "default": 30
+    },
     "camera_capture_device_index": {
       "type": "integer",
       "default": 0
@@ -325,6 +353,42 @@
     "camera_capture_timeout_ms": {
       "type": "integer",
       "default": 500
+    },
+    "pressure_serial_url": {
+      "type": "string",
+      "default": ""
+    },
+    "pressure_serial_baud": {
+      "type": "integer",
+      "default": 115200
+    },
+    "pressure_serial_format": {
+      "type": "string",
+      "default": "auto"
+    },
+    "pressure_serial_timeout_ms": {
+      "type": "integer",
+      "default": 50
+    },
+    "pressure_serial_z_index": {
+      "type": "integer",
+      "default": 2
+    },
+    "ultrasound_capture_device_index": {
+      "type": "integer",
+      "default": 1
+    },
+    "ultrasound_capture_width": {
+      "type": "integer",
+      "default": 800
+    },
+    "ultrasound_capture_height": {
+      "type": "integer",
+      "default": 600
+    },
+    "ultrasound_capture_fps": {
+      "type": "integer",
+      "default": 30
     },
     "guidance_review_operator_id": {
       "type": "string",
@@ -588,8 +652,24 @@
     "camera_guidance_source_path",
     "camera_guidance_file_glob",
     "camera_guidance_frame_count",
+    "camera_device_id",
+    "camera_depth_enabled",
+    "camera_depth_unit",
+    "camera_realsense_serial",
+    "camera_realsense_stream_width",
+    "camera_realsense_stream_height",
+    "camera_realsense_fps",
     "camera_capture_device_index",
     "camera_capture_timeout_ms",
+    "pressure_serial_url",
+    "pressure_serial_baud",
+    "pressure_serial_format",
+    "pressure_serial_timeout_ms",
+    "pressure_serial_z_index",
+    "ultrasound_capture_device_index",
+    "ultrasound_capture_width",
+    "ultrasound_capture_height",
+    "ultrasound_capture_fps",
     "guidance_review_operator_id",
     "rt_network_tolerance_percent",
     "joint_filter_hz",

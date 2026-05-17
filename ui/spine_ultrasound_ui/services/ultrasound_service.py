@@ -20,6 +20,31 @@ class CouplingAssessment:
     warning: str | None = None
 
 
+@dataclass(frozen=True)
+class UltrasoundCaptureConfig:
+    device_idx: int = 1
+    width: int = 800
+    height: int = 600
+    fps: int = 30
+
+    @classmethod
+    def from_runtime_config(cls, config) -> "UltrasoundCaptureConfig":
+        return cls(
+            device_idx=int(getattr(config, "ultrasound_capture_device_index", 1) or 1),
+            width=int(getattr(config, "ultrasound_capture_width", 800) or 800),
+            height=int(getattr(config, "ultrasound_capture_height", 600) or 600),
+            fps=int(getattr(config, "ultrasound_capture_fps", 30) or 30),
+        )
+
+    def to_dict(self) -> dict[str, int]:
+        return {
+            "device_idx": int(self.device_idx),
+            "width": int(self.width),
+            "height": int(self.height),
+            "fps": int(self.fps),
+        }
+
+
 class UltrasoundCouplingMonitor:
     def __init__(self, *, dark_threshold: int = 15, decoupled_ratio: float = 0.85) -> None:
         self.dark_threshold = dark_threshold
@@ -37,11 +62,12 @@ class UltrasoundCouplingMonitor:
 class UltrasoundIngestionProcess(SensorIngestionProcess):
     """Sub-process that acquires grayscale ultrasound frames from a V4L2 capture device."""
 
-    def __init__(self, device_idx: int, width: int, height: int, init_kwargs):
+    def __init__(self, device_idx: int, width: int, height: int, fps: int, init_kwargs):
         super().__init__(**init_kwargs)
         self.device_idx = device_idx
         self.width = width
         self.height = height
+        self.fps = fps
         self.cap = None
         self.coupling_monitor = UltrasoundCouplingMonitor()
 
@@ -54,7 +80,7 @@ class UltrasoundIngestionProcess(SensorIngestionProcess):
 
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        self.cap.set(cv2.CAP_PROP_FPS, 30)
+        self.cap.set(cv2.CAP_PROP_FPS, self.fps)
         return True
 
     def read_frame(self) -> Tuple[bool, Optional[np.ndarray], int]:
@@ -82,13 +108,31 @@ class UltrasoundIngestionProcess(SensorIngestionProcess):
 class UltrasoundService(SensorProvider):
     """Provides a zero-copy grayscale ultrasound stream to the UI/runtime."""
 
-    def __init__(self, device_idx: int = 1, width: int = 800, height: int = 600, parent=None):
+    def __init__(self, device_idx: int = 1, width: int = 800, height: int = 600, fps: int = 30, parent=None):
         shape = (height, width)
         dtype = np.uint8
-        self.device_idx = device_idx
-        self.img_width = width
-        self.img_height = height
+        self.capture_config = UltrasoundCaptureConfig(device_idx=device_idx, width=width, height=height, fps=fps)
+        self.device_idx = self.capture_config.device_idx
+        self.img_width = self.capture_config.width
+        self.img_height = self.capture_config.height
+        self.fps = self.capture_config.fps
         super().__init__(name="ultrasound", shape=shape, dtype=dtype, process_class=UltrasoundIngestionProcess, parent=parent)
+
+    @classmethod
+    def from_runtime_config(cls, config, parent=None) -> "UltrasoundService":
+        capture = UltrasoundCaptureConfig.from_runtime_config(config)
+        return cls(device_idx=capture.device_idx, width=capture.width, height=capture.height, fps=capture.fps, parent=parent)
+
+    def capture_status(self) -> dict[str, object]:
+        return {
+            "provider": "v4l2_opencv",
+            "configured": self.capture_config.to_dict(),
+            "running": bool(self._process is not None and self._process.is_alive()),
+            "latest_ts_ns": int(self.latest_ts_ns.value),
+            "shm_name": self.shm_name,
+            "frame_shape": list(self.shape),
+            "dtype": str(self.dtype),
+        }
 
     def start(self):
         if self._process is not None and self._process.is_alive():
@@ -115,6 +159,7 @@ class UltrasoundService(SensorProvider):
             device_idx=self.device_idx,
             width=self.img_width,
             height=self.img_height,
+            fps=self.fps,
             init_kwargs=init_kwargs,
         )
         self._process.start()

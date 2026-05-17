@@ -8,6 +8,9 @@
     "normal": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
     "surface_pitch_deg": {"type": "number"},
     "surface_yaw_deg": {"type": "number"},
+    "surface_z_mm": {"type": "number"},
+    "depth_valid_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+    "depth_source": {"type": "string", "enum": ["depth_frame", "image_only_fallback"]},
     "probe_tilt_limits_deg": {
       "type": "object",
       "required": ["min", "max"],

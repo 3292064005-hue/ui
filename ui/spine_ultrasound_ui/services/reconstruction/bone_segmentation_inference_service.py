@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 
+from spine_ultrasound_ui.training.runtime_adapters.common import ModelRuntimeLoadError, strict_model_runtime_required_for_target
 from spine_ultrasound_ui.training.runtime_adapters.segmentation_runtime_adapter import SegmentationRuntimeAdapter
 from spine_ultrasound_ui.utils import now_text
 
@@ -35,6 +36,7 @@ class BoneSegmentationInferenceService:
             Path(__file__).resolve().parents[3] / 'configs' / 'models' / 'lamina_seg_runtime.yaml',
         )
         self.runtime_load_error = ''
+        self.strict_runtime_required = strict_model_runtime_required_for_target(self.runtime_model_config)
         self._try_load_runtime_adapter()
 
     def infer(self, projection_bundle: dict[str, Any]) -> dict[str, Any]:
@@ -57,6 +59,8 @@ class BoneSegmentationInferenceService:
         image = np.asarray(projection_bundle.get('image'))
         if image.ndim != 2:
             raise ValueError('projection_bundle.image must be a 2D array')
+        if self.strict_runtime_required and (self.runtime_adapter is None or not self.runtime_adapter.is_loaded):
+            raise ModelRuntimeLoadError(f'model_runtime_blocked:lamina_seg:{self.runtime_load_error or "runtime_adapter_not_loaded"}')
         if self.runtime_adapter is not None and self.runtime_adapter.is_loaded:
             payload = self.runtime_adapter.infer({'image': image})
             return {
@@ -92,6 +96,7 @@ class BoneSegmentationInferenceService:
         if self.runtime_adapter is None and self.runtime_model_config:
             self.runtime_adapter = SegmentationRuntimeAdapter()
         if self.runtime_adapter is None or not self.runtime_model_config:
+            self.runtime_load_error = 'no_runtime_model_config'
             return
         config_path = Path(str(self.runtime_model_config))
         if not config_path.exists():

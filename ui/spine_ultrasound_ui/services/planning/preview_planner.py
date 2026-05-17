@@ -43,14 +43,27 @@ class PreviewPlanner:
         x_origin = float(corridor_start.get("x", 110.0))
         surface_z = float(surface_model.surface_z_mm)
         clearance = float(surface_model.clearance_mm)
-        approach = ScanWaypoint(x=x_origin, y=center_y, z=surface_z + clearance, rx=180.0, ry=0.0, rz=90.0)
+        body_surface = dict(localization.patient_registration.get("body_surface", {}))
+        surface_pitch_deg = float(body_surface.get("surface_pitch_deg", surface_model.local_tilt_deg) or 0.0)
+        surface_yaw_deg = float(body_surface.get("surface_yaw_deg", 0.0) or 0.0)
+        normal = [float(value) for value in list(body_surface.get("normal", [0.0, 0.0, -1.0]))[:3]]
+        while len(normal) < 3:
+            normal.append(0.0)
+        pitch_limit = abs(float(profile.surface_tilt_limits_deg.get("pitch", 6.0) or 6.0))
+        yaw_limit = abs(float(profile.surface_tilt_limits_deg.get("yaw", 15.0) or 15.0))
+        clamped_pitch = max(-pitch_limit, min(pitch_limit, surface_pitch_deg))
+        clamped_yaw = max(-yaw_limit, min(yaw_limit, surface_yaw_deg))
+        probe_rx = round(180.0 + clamped_pitch, 3)
+        probe_ry = 0.0
+        probe_rz = round(90.0 + clamped_yaw, 3)
+        approach = ScanWaypoint(x=x_origin, y=center_y, z=surface_z + clearance, rx=probe_rx, ry=probe_ry, rz=probe_rz)
         retreat = ScanWaypoint(
             x=x_origin + min(20.0, corridor_length * 0.1),
             y=center_y,
             z=surface_z + clearance + profile.contact_guard_margin_mm,
-            rx=180.0,
-            ry=0.0,
-            rz=90.0,
+            rx=probe_rx,
+            ry=probe_ry,
+            rz=probe_rz,
         )
         point_count = max(2, int(round(corridor_length / max(config.sample_step_mm, 0.1))) + 1)
         strip_spacing_mm = max(1.0, min(config.strip_width_mm, profile.strip_width_mm) - max(config.strip_overlap_mm, profile.strip_overlap_mm))
@@ -64,7 +77,7 @@ class PreviewPlanner:
             if reverse:
                 x_values = list(reversed(x_values))
             waypoints = [
-                ScanWaypoint(x=round(x, 3), y=round(y_base, 3), z=surface_z, rx=180.0, ry=0.0, rz=90.0)
+                ScanWaypoint(x=round(x, 3), y=round(y_base, 3), z=surface_z, rx=probe_rx, ry=probe_ry, rz=probe_rz)
                 for x in x_values
             ]
             segment = ScanSegment(
@@ -103,4 +116,7 @@ class PreviewPlanner:
             "strip_spacing_mm": strip_spacing_mm,
             "corridor_length_mm": corridor_length,
             "surface_tilt_deg": surface_model.local_tilt_deg,
+            "rgbd_surface_pitch_deg": surface_pitch_deg,
+            "rgbd_surface_yaw_deg": surface_yaw_deg,
+            "surface_normal": normal,
         }

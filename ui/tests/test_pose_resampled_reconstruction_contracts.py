@@ -113,20 +113,28 @@ def _build_session(tmp_path: Path) -> Path:
     _app()
     backend = MockBackend(Path(tmp_path))
     controller = AppController(Path(tmp_path), backend)
-    controller.connect_robot()
-    controller.power_on()
-    controller.set_auto_mode()
-    controller.create_experiment()
-    controller.run_localization()
-    controller.generate_path()
-    controller.start_procedure()
-    controller.safe_retreat()
-    controller.save_results()
-    controller.export_summary()
+    def call(name: str, *args, **kwargs) -> None:
+        getattr(controller, name)(*args, **kwargs)
+        app = QApplication.instance()
+        if app is not None:
+            for _ in range(12):
+                app.processEvents()
+
+    call("connect_robot")
+    call("power_on")
+    call("set_auto_mode")
+    call("create_experiment")
+    call("run_localization")
+    call("approve_localization_review", operator_id="fixture_acceptance")
+    call("generate_path")
+    call("start_procedure")
+    call("safe_retreat")
+    call("save_results")
+    call("export_summary")
     assert controller.session_service.current_session_dir is not None
     _seed_recorded_evidence(controller, controller.session_service.current_session_dir)
-    controller.run_preprocess()
-    controller.run_reconstruction()
+    call("run_preprocess")
+    call("run_reconstruction")
     assert controller.session_service.current_session_dir is not None
     return controller.session_service.current_session_dir
 

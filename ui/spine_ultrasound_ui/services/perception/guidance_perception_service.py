@@ -74,6 +74,10 @@ class GuidancePerceptionService:
             raise RuntimeError('guidance perception requires at least one frame')
         stack = np.stack([frame.pixels for frame in frames], axis=0)
         mean_frame = np.mean(stack, axis=0)
+        depth_frames = [frame.depth_pixels for frame in frames if frame.depth_pixels is not None]
+        mean_depth: np.ndarray | None = None
+        if depth_frames:
+            mean_depth = np.mean(np.stack(depth_frames, axis=0), axis=0)
         provider_mode = frames[0].provider_mode
         height, width = mean_frame.shape
         mm_per_pixel_x = float(
@@ -111,6 +115,7 @@ class GuidancePerceptionService:
         sample_rows = np.linspace(y0, y1, num=4, dtype=int)
         midline_points: list[dict[str, float]] = []
         center_cols: list[float] = []
+        surface_z_values: list[float] = []
         for idx, row in enumerate(sample_rows):
             row_slice = mean_frame[max(0, row - 2):min(height, row + 3), :].mean(axis=0)
             row_active = np.where(row_slice >= max(float(row_slice.mean()), 0.35))[0]
@@ -122,11 +127,20 @@ class GuidancePerceptionService:
             progress = idx / max(len(sample_rows) - 1, 1)
             longitudinal_mm = round(progress * segment_count * segment_length_mm, 2)
             lateral_mm = round((row_center - (width / 2.0)) * mm_per_pixel_x, 2)
-            midline_points.append({'x': longitudinal_mm, 'y': lateral_mm, 'z': 205.0})
+            surface_z = self._depth_at(mean_depth, row=row, col=int(round(row_center)), fallback=205.0)
+            surface_z_values.append(surface_z)
+            midline_points.append({'x': longitudinal_mm, 'y': lateral_mm, 'z': round(surface_z, 3)})
         slope = 0.0
         if len(center_cols) > 1:
             slope = float(np.polyfit(sample_rows.astype(np.float64), np.array(center_cols, dtype=np.float64), deg=1)[0])
         surface_yaw_deg = round(float(np.degrees(np.arctan(slope))), 2)
+        depth_surface = self._depth_surface_metrics(
+            mean_depth=mean_depth,
+            roi=(x0, x1, y0, y1),
+            mm_per_pixel_x=mm_per_pixel_x,
+            mm_per_pixel_y=mm_per_pixel_y,
+            fallback_z=float(np.median(surface_z_values)) if surface_z_values else 205.0,
+        )
         coverage_ratio = float((bbox_width_px * bbox_height_px) / max(width * height, 1))
         contrast = float((column_energy.max() - column_energy.mean()) / max(column_energy.std(), 1e-6))
         confidence = round(float(np.clip(0.62 + 0.12 * min(contrast, 2.0) + 0.18 * min(coverage_ratio * 10.0, 1.0), 0.0, 0.98)), 3)
@@ -151,10 +165,13 @@ class GuidancePerceptionService:
             'confidence': round(min(0.99, confidence + 0.02), 3),
         }
         body_surface = {
-            'model': 'camera_surface_fit_v1',
-            'normal': [0.0, 0.0, -1.0],
-            'surface_pitch_deg': 0.0,
+            'model': 'rgbd_surface_fit_v1' if mean_depth is not None else 'camera_surface_fit_v1',
+            'normal': depth_surface['normal'],
+            'surface_pitch_deg': depth_surface['surface_pitch_deg'],
             'surface_yaw_deg': surface_yaw_deg,
+            'surface_z_mm': depth_surface['surface_z_mm'],
+            'depth_valid_ratio': depth_surface['depth_valid_ratio'],
+            'depth_source': 'depth_frame' if mean_depth is not None else 'image_only_fallback',
             'probe_tilt_limits_deg': {'min': -8.0, 'max': 8.0},
             'contact_guard_margin_mm': 4.0,
         }
@@ -169,10 +186,11 @@ class GuidancePerceptionService:
             'overall_confidence': confidence,
             'roi_confidence': confidence,
             'midline_confidence': midline_polyline['confidence'],
-            'surface_fit_rms_mm': round(max(0.8, 3.0 - coverage_ratio * 5.0), 3),
+            'surface_fit_rms_mm': depth_surface['surface_fit_rms_mm'],
             'corridor_margin_mm': round(max(5.0, 12.0 - abs(roi_center_y_mm) * 0.1), 3),
             'landmark_count': len(landmarks),
             'coverage_ratio': round(coverage_ratio, 4),
+            'depth_valid_ratio': depth_surface['depth_valid_ratio'],
             'provider_mode': provider_mode,
         }
         registration_quality = {
@@ -196,6 +214,7 @@ class GuidancePerceptionService:
         notes = [
             f'Guidance derived from {len(frames)} frame(s) using provider mode {provider_mode}.',
             f'Image-derived ROI center={roi_center_y_mm} mm, segment_count={segment_count}, confidence={confidence}.',
+            f'Depth surface source={body_surface["depth_source"]}, z={body_surface["surface_z_mm"]} mm, normal={body_surface["normal"]}.',
         ]
         return GuidanceObservation(
             roi_center_y_mm=roi_center_y_mm,
@@ -211,3 +230,65 @@ class GuidancePerceptionService:
             registration_quality=registration_quality,
             provider_mode=provider_mode,
         )
+
+    @staticmethod
+    def _depth_at(mean_depth: np.ndarray | None, *, row: int, col: int, fallback: float) -> float:
+        if mean_depth is None:
+            return float(fallback)
+        y0 = max(0, int(row) - 3)
+        y1 = min(mean_depth.shape[0], int(row) + 4)
+        x0 = max(0, int(col) - 3)
+        x1 = min(mean_depth.shape[1], int(col) + 4)
+        patch = mean_depth[y0:y1, x0:x1]
+        values = patch[np.isfinite(patch) & (patch > 0.0)]
+        return float(np.median(values)) if values.size else float(fallback)
+
+    @staticmethod
+    def _depth_surface_metrics(
+        *,
+        mean_depth: np.ndarray | None,
+        roi: tuple[int, int, int, int],
+        mm_per_pixel_x: float,
+        mm_per_pixel_y: float,
+        fallback_z: float,
+    ) -> dict[str, Any]:
+        if mean_depth is None:
+            return {
+                'normal': [0.0, 0.0, -1.0],
+                'surface_pitch_deg': 0.0,
+                'surface_z_mm': round(float(fallback_z), 3),
+                'surface_fit_rms_mm': 2.4,
+                'depth_valid_ratio': 0.0,
+            }
+        x0, x1, y0, y1 = roi
+        patch = mean_depth[max(0, y0):min(mean_depth.shape[0], y1 + 1), max(0, x0):min(mean_depth.shape[1], x1 + 1)]
+        valid_mask = np.isfinite(patch) & (patch > 0.0)
+        valid = patch[valid_mask]
+        if valid.size < 16:
+            return {
+                'normal': [0.0, 0.0, -1.0],
+                'surface_pitch_deg': 0.0,
+                'surface_z_mm': round(float(fallback_z), 3),
+                'surface_fit_rms_mm': 3.2,
+                'depth_valid_ratio': round(float(valid.size / max(patch.size, 1)), 4),
+            }
+        rows, cols = np.where(valid_mask)
+        z = patch[valid_mask].astype(np.float64)
+        x = cols.astype(np.float64) * max(float(mm_per_pixel_x), 1e-6)
+        y = rows.astype(np.float64) * max(float(mm_per_pixel_y), 1e-6)
+        design = np.column_stack([x, y, np.ones_like(x)])
+        coeffs, *_ = np.linalg.lstsq(design, z, rcond=None)
+        dz_dx, dz_dy, intercept = [float(value) for value in coeffs]
+        predicted = design @ coeffs
+        rmse = float(np.sqrt(np.mean((z - predicted) ** 2)))
+        normal = np.array([-dz_dx, -dz_dy, -1.0], dtype=np.float64)
+        normal = normal / max(float(np.linalg.norm(normal)), 1e-9)
+        pitch = float(np.degrees(np.arctan2(dz_dy, 1.0)))
+        return {
+            'normal': [round(float(value), 6) for value in normal.tolist()],
+            'surface_pitch_deg': round(pitch, 3),
+            'surface_z_mm': round(float(np.median(valid)), 3),
+            'surface_fit_rms_mm': round(max(0.4, rmse), 3),
+            'depth_valid_ratio': round(float(valid.size / max(patch.size, 1)), 4),
+            'plane': {'dz_dx': round(dz_dx, 6), 'dz_dy': round(dz_dy, 6), 'intercept_mm': round(intercept, 3)},
+        }

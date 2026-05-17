@@ -1,0 +1,7 @@
+package_dir: ../packages/frame_anatomy_keypoint
+backend: numpy_template_export
+strict_runtime_required: true
+runtime_model_path: ../packages/frame_anatomy_keypoint/frame_anatomy_keypoint_weights.npz
+benchmark_manifest: ../packages/frame_anatomy_keypoint/benchmark_manifest.json
+required_release_state: research_fixture
+require_benchmark_gate: true

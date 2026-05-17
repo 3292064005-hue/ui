@@ -1,0 +1,33 @@
+{
+  "generated_at": "2026-05-17 17:05:35",
+  "task_name": "lamina_center",
+  "trainer_backend": "numpy_baseline",
+  "learned_parameters": {
+    "avg_lamina_separation_mm": 80.0,
+    "min_confidence": 1.0,
+    "candidate_window_px": 12
+  },
+  "metrics": {
+    "sample_count": 1,
+    "pair_count": 1,
+    "avg_visibility_score": 1.0
+  },
+  "spec": {
+    "dataset_root": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/fixtures/lamina_center",
+    "split_file": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/fixtures/lamina_center/splits/split_v1.json",
+    "output_dir": "artifacts/delivery/final_fixture_acceptance/fixture_model_training/requests/lamina_center",
+    "task_name": "lamina_center",
+    "input_mode": "vpi_2d",
+    "segmentation_backbone": "numpy_baseline_seg",
+    "keypoint_head": "numpy_baseline_heatmap",
+    "batch_size": 4,
+    "max_epochs": 12,
+    "learning_rate": 0.001,
+    "num_workers": 0,
+    "mixed_precision": false,
+    "export_onnx": false,
+    "split_name": "train",
+    "trainer_backend": "numpy_baseline",
+    "backend_options": {}
+  }
+}

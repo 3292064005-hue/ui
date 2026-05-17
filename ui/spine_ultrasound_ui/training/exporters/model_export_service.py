@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -63,21 +64,36 @@ class ModelExportService:
             source_model_path = Path(source_model_path)
             if not source_model_path.exists():
                 raise FileNotFoundError(source_model_path)
-            runtime_model_path = str(package_dir / source_model_path.name)
+            runtime_model_path = source_model_path.name
             shutil.copy2(source_model_path, package_dir / source_model_path.name)
         parameter_path.write_text(json.dumps(learned, indent=2, ensure_ascii=False), encoding='utf-8')
+        training_run_id = str(training_result.get('training_run_id', '') or self._training_run_id(model_name, training_result))
+        dataset_source = str(training_result.get('dataset_source', '') or 'fixture')
+        dataset_hash = str(training_result.get('dataset_hash', '') or self._stable_hash(dict(training_result.get('spec', {}))))
+        release_state = str(training_result.get('release_state', '') or 'research_fixture')
+        clinical_claim = str(training_result.get('clinical_claim', '') or 'non_clinical_research_only')
+        benchmark_manifest_path = str(training_result.get('benchmark_manifest_path', '') or '')
         meta = {
             'generated_at': now_text(),
             'model_name': model_name,
+            'package_name': f'{model_name}_fixture',
+            'runtime_kind': 'deterministic_baseline',
+            'release_state': release_state,
+            'clinical_claim': clinical_claim,
+            'training_run_id': training_run_id,
+            'dataset_source': dataset_source,
+            'dataset_hash': dataset_hash,
+            'strict_runtime_required': True,
             'task_name': str(training_result.get('task_name', model_name) or model_name),
             'trainer_backend': str(training_result.get('trainer_backend', 'numpy_baseline') or 'numpy_baseline'),
-            'training_spec': dict(training_result.get('spec', {})),
+            'training_spec': self._portable_payload(dict(training_result.get('spec', {}))),
             'runtime_model_path': runtime_model_path,
-            'parameter_path': str(parameter_path),
+            'parameter_path': str(parameter_path.name),
             'metrics': dict(training_result.get('metrics', {})),
             'training_request_path': str(training_result.get('training_request_path', '') or ''),
             'dependency_status': dict(training_result.get('dependency_status', {})),
             'launch_plan': dict(training_result.get('launch_plan', {})),
+            'benchmark_manifest_path': benchmark_manifest_path,
         }
         meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding='utf-8')
         manifest = build_model_bundle_manifest(
@@ -89,6 +105,14 @@ class ModelExportService:
             parameter_path=str(parameter_path.name),
             meta_path=str(meta_path.name),
             metrics=dict(training_result.get('metrics', {})),
+            training_run_id=training_run_id,
+            dataset_source=dataset_source,
+            dataset_hash=dataset_hash,
+            trainer_backend=str(training_result.get('trainer_backend', 'numpy_baseline') or 'numpy_baseline'),
+            release_state=release_state,
+            clinical_claim=clinical_claim,
+            benchmark_manifest_path=benchmark_manifest_path,
+            strict_runtime_required=True,
         )
         manifest_path = write_model_bundle_manifest(package_dir, manifest)
         return {
@@ -98,3 +122,45 @@ class ModelExportService:
             'runtime_model_path': runtime_model_path,
             'bundle_manifest_path': str(manifest_path),
         }
+
+    @staticmethod
+    def _stable_hash(payload: dict[str, Any]) -> str:
+        data = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode('utf-8')
+        return hashlib.sha256(data).hexdigest()
+
+    def _training_run_id(self, model_name: str, training_result: dict[str, Any]) -> str:
+        return f"{model_name}:{self._stable_hash({'model': model_name, 'metrics': training_result.get('metrics', {}), 'spec': training_result.get('spec', {})})[:16]}"
+
+    @classmethod
+    def _portable_payload(cls, payload: dict[str, Any]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in payload.items():
+            if isinstance(value, Path):
+                result[key] = cls._portable_path(value)
+            elif isinstance(value, dict):
+                result[key] = cls._portable_payload(value)
+            elif isinstance(value, list):
+                result[key] = [cls._portable_value(item) for item in value]
+            else:
+                result[key] = cls._portable_value(value)
+        return result
+
+    @classmethod
+    def _portable_value(cls, value: Any) -> Any:
+        if isinstance(value, Path):
+            return cls._portable_path(value)
+        if isinstance(value, str) and value.startswith('/'):
+            return cls._portable_path(Path(value))
+        if isinstance(value, dict):
+            return cls._portable_payload(value)
+        if isinstance(value, list):
+            return [cls._portable_value(item) for item in value]
+        return value
+
+    @staticmethod
+    def _portable_path(path: Path) -> str:
+        repo_root = Path(__file__).resolve().parents[3]
+        try:
+            return str(path.resolve().relative_to(repo_root))
+        except Exception:
+            return path.name
